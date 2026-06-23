@@ -1,0 +1,43 @@
+# 敏感文件
+.env
+!.env.example
+
+# 本地配置（使用时从 config.json.example 拷贝并修改）
+config.json
+!config.json.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv
+
+# 测试
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 数据文件
+news-data/
+*.log
+
+
+# Claude/其他代理数据
+.omc/
+.claude/
+
+# Git worktrees
+.worktrees/
