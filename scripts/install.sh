@@ -98,6 +98,9 @@ echo ""
 # ─── [4/6] 生成单元文件 ─────────────────────────────────────
 echo "📝 [4/6] 渲染 systemd 单元模板..."
 STAGE_DIR="$(mktemp -d)"
+if [[ $EUID -eq 0 ]]; then
+    chown "$RUN_USER:$RUN_GROUP" "$STAGE_DIR"
+fi
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
 run_uv run python "$PROJECT_DIR/scripts/_gen_units.py" \
