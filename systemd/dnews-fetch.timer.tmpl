@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily News - Fetch Timer
+
+[Timer]
+OnActiveSec=1s
+OnUnitActiveSec={{FETCH_INTERVAL_MIN}}min
+AccuracySec=1s
+Unit=dnews-fetch.service
+
+[Install]
+WantedBy=timers.target

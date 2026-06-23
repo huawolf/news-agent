@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily News - Fetch Job
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+Group={{GROUP}}
+WorkingDirectory={{PROJECT_DIR}}
+EnvironmentFile={{PROJECT_DIR}}/.env
+ExecStart={{UV_BIN}} run --project {{PROJECT_DIR}} python -m src.main fetch
+LogNamespace=dnews
+TimeoutStartSec=20min
+Nice=10

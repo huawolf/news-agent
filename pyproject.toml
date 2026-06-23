@@ -1,0 +1,17 @@
+[project]
+name = "daily-news"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.9.0",
+    "beautifulsoup4>=4.12.0",
+    "croniter>=6.0.0",
+    "feedparser>=6.0.0",
+    "markdownify>=0.11.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.10.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "requests>=2.34.2",
+]

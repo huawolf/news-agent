@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# daily-news - Daily News 系统服务管理包装脚本
+# 由 scripts/install.sh 自动生成；项目路径：{{PROJECT_DIR}}
+
+set -euo pipefail
+
+TIMERS=(dnews-fetch.timer dnews-push.timer)
+SERVICES=(dnews-fetch.service dnews-push.service)
+PROJECT_DIR="{{PROJECT_DIR}}"
+
+usage() {
+    cat <<EOF
+用法: daily-news <command>
+
+命令:
+  start      启动 fetch 和 push timer
+  stop       停止两个 timer
+  restart    重启两个 timer（不会立即触发 service，仅重置调度）
+  status [N] 查看 timer / service 状态 + 最近 N 行日志（默认 15）
+  logs       实时跟随日志（Ctrl+C 退出）
+
+其他操作：
+  $PROJECT_DIR/scripts/install.sh     重新生成单元并安装（改 config.json 后用）
+  $PROJECT_DIR/scripts/uninstall.sh   完全卸载（不删数据）
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    start)
+        sudo systemctl start "${TIMERS[@]}"
+        echo "✓ Daily News 已启动"
+        ;;
+    stop)
+        sudo systemctl stop "${TIMERS[@]}"
+        echo "✓ Daily News 已停止"
+        ;;
+    restart)
+        sudo systemctl restart "${TIMERS[@]}"
+        echo "✓ Daily News 已重启"
+        ;;
+    status)
+        lines="${2:-15}"
+        echo "═══ Timer ═══"
+        systemctl list-timers 'dnews-*' --no-pager || true
+        echo ""
+        echo "═══ Service 状态 ═══"
+        systemctl status "${SERVICES[@]}" --no-pager --lines=0 || true
+        echo ""
+        echo "═══ 最近 $lines 行日志 ═══"
+        journalctl --namespace=dnews -u dnews-fetch -u dnews-push -n "$lines" --no-pager
+        echo ""
+        echo "💡 实时跟随：daily-news logs"
+        ;;
+    logs)
+        journalctl --namespace=dnews -u dnews-fetch -u dnews-push -f
+        ;;
+    -h|--help|help|"")
+        usage
+        ;;
+    *)
+        echo "❌ 未知命令: $cmd" >&2
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily News - Push Job
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+Group={{GROUP}}
+WorkingDirectory={{PROJECT_DIR}}
+EnvironmentFile={{PROJECT_DIR}}/.env
+ExecStart={{UV_BIN}} run --project {{PROJECT_DIR}} python -m src.main push
+LogNamespace=dnews
+TimeoutStartSec=10min
+Nice=10

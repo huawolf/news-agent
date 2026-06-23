@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily News - Push Timer
+
+[Timer]
+{{PUSH_ONCALENDAR_LINES}}
+AccuracySec=1s
+Unit=dnews-push.service
+
+[Install]
+WantedBy=timers.target

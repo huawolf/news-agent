@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <defs>
+    <!-- 浅色渐变背景 -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8f9fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e8eaed;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Google 色系 -->
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4285F4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a73e8;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#EA4335;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d93025;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="yellowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FBBC05;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f9a825;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#34A853;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e8e3e;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- 柔和发光效果 -->
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.1"/>
+    </filter>
+    
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- 背景 -->
+  <rect width="1200" height="400" fill="url(#bgGrad)"/>
+  
+  <!-- 背景装饰圆点 -->
+  <circle cx="100" cy="80" r="60" fill="#4285F4" opacity="0.08"/>
+  <circle cx="1100" cy="100" r="80" fill="#EA4335" opacity="0.06"/>
+  <circle cx="150" cy="350" r="50" fill="#34A853" opacity="0.08"/>
+  <circle cx="1050" cy="320" r="70" fill="#FBBC05" opacity="0.08"/>
+  <circle cx="600" cy="50" r="40" fill="#4285F4" opacity="0.05"/>
+  
+  <!-- 网格线 -->
+  <g stroke="#dadce0" stroke-width="0.5" opacity="0.5">
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="300" x2="1200" y2="300"/>
+    <line x1="300" y1="0" x2="300" y2="400"/>
+    <line x1="600" y1="0" x2="600" y2="400"/>
+    <line x1="900" y1="0" x2="900" y2="400"/>
+  </g>
+  
+  <!-- Google 色系装饰：RSS 聚合 (左侧) -->
+  <g transform="translate(120, 200)">
+    <circle cx="0" cy="0" r="25" fill="none" stroke="#4285F4" stroke-width="2" opacity="0.3"/>
+    <circle cx="0" cy="0" r="18" fill="none" stroke="#4285F4" stroke-width="2" opacity="0.5"/>
+    <circle cx="0" cy="0" r="10" fill="none" stroke="#4285F4" stroke-width="2.5"/>
+    <circle cx="0" cy="0" r="4" fill="#4285F4"/>
+    <!-- 信号线 -->
+    <g stroke="#4285F4" stroke-width="1.5" opacity="0.4">
+      <line x1="25" y1="0" x2="40" y2="0"/>
+      <line x1="18" y1="-18" x2="28" y2="-28"/>
+      <line x1="0" y1="-25" x2="0" y2="-40"/>
+      <line x1="-18" y1="-18" x2="-28" y2="-28"/>
+      <line x1="-25" y1="0" x2="-40" y2="0"/>
+      <line x1="-18" y1="18" x2="-28" y2="28"/>
+      <line x1="0" y1="25" x2="0" y2="40"/>
+      <line x1="18" y1="18" x2="28" y2="28"/>
+    </g>
+  </g>
+  
+  <!-- Google 色系装饰：AI 智能 (右侧) -->
+  <g transform="translate(1080, 200)">
+    <circle cx="0" cy="0" r="8" fill="#EA4335" filter="url(#glow)"/>
+    <circle cx="-25" cy="-20" r="5" fill="#FBBC05"/>
+    <circle cx="25" cy="-20" r="5" fill="#34A853"/>
+    <circle cx="0" cy="30" r="5" fill="#4285F4"/>
+    <!-- 连接线 -->
+    <g stroke="#5f6368" stroke-width="1" opacity="0.4">
+      <line x1="-21" y1="-17" x2="-6" y2="-4"/>
+      <line x1="21" y1="-17" x2="6" y2="-4"/>
+      <line x1="0" y1="25" x2="0" y2="4"/>
+    </g>
+  </g>
+  
+  <!-- 底部数据流装饰 -->
+  <g transform="translate(0, 360)" opacity="0.6">
+    <rect x="80" y="0" width="60" height="3" rx="1.5" fill="#4285F4">
+      <animate attributeName="width" values="60;80;60" dur="2s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="180" y="5" width="40" height="3" rx="1.5" fill="#EA4335">
+      <animate attributeName="width" values="40;55;40" dur="2.3s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="950" y="0" width="70" height="3" rx="1.5" fill="#34A853">
+      <animate attributeName="width" values="70;90;70" dur="1.8s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="1050" y="5" width="50" height="3" rx="1.5" fill="#FBBC05">
+      <animate attributeName="width" values="50;65;50" dur="2.1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  
+  <!-- 主标题 -->
+  <g transform="translate(600, 170)" filter="url(#softShadow)">
+    <text x="0" y="0" text-anchor="middle" font-family="system-ui, -apple-system, 'Google Sans', sans-serif" font-size="56" font-weight="700" fill="#202124">
+      AI Daily
+    </text>
+    <text x="0" y="38" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="400" fill="#5f6368">
+      每日 AI 资讯推送系统
+    </text>
+  </g>
+  
+  <!-- 核心标签 (Google 色系) -->
+  <g transform="translate(600, 250)" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="500">
+    <!-- RSS 聚合 - 蓝色 -->
+    <rect x="-175" y="-14" width="70" height="28" rx="14" fill="#4285F4" opacity="0.12"/>
+    <text x="-140" y="4" text-anchor="middle" fill="#4285F4">RSS 聚合</text>
+    
+    <!-- LLM 智能 - 红色 -->
+    <rect x="-85" y="-14" width="70" height="28" rx="14" fill="#EA4335" opacity="0.12"/>
+    <text x="-50" y="4" text-anchor="middle" fill="#EA4335">LLM 智能</text>
+    
+    <!-- 即时推送 - 黄色 -->
+    <rect x="5" y="-14" width="70" height="28" rx="14" fill="#FBBC05" opacity="0.2"/>
+    <text x="40" y="4" text-anchor="middle" fill="#c98400">即时推送</text>
+    
+    <!-- 定时汇总 - 绿色 -->
+    <rect x="90" y="-14" width="70" height="28" rx="14" fill="#34A853" opacity="0.12"/>
+    <text x="125" y="4" text-anchor="middle" fill="#34A853">定时汇总</text>
+  </g>
+  
+  <!-- 底部强调线 -->
+  <g transform="translate(600, 310)">
+    <line x1="-200" y1="0" x2="-80" y2="0" stroke="#4285F4" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="-60" y1="0" x2="60" y2="0" stroke="#EA4335" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="80" y1="0" x2="200" y2="0" stroke="#34A853" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  </g>
+  
+  <!-- 角落装饰 -->
+  <circle cx="40" cy="40" r="4" fill="#4285F4" opacity="0.3"/>
+  <circle cx="1160" cy="40" r="4" fill="#EA4335" opacity="0.3"/>
+  <circle cx="40" cy="360" r="4" fill="#34A853" opacity="0.3"/>
+  <circle cx="1160" cy="360" r="4" fill="#FBBC05" opacity="0.3"/>
+</svg>
