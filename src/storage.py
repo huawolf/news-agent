@@ -544,3 +544,69 @@ def assemble_with_sentinels(sections: Dict[str, str]) -> str:
             f"<!-- SECTION:{key} BEGIN -->\n{body}\n<!-- SECTION:{key} END -->"
         )
     return "\n\n".join(parts)
+
+
+def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
+    """加载 sent-history.json 中 3 天内已发送的链接，并自动清理过期条目"""
+    path = Path(data_dir) / "sent-history.json"
+    if not path.exists() or path.stat().st_size == 0:
+        return set()
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception as e:
+        print(f"⚠️ 读取 sent-history.json 失败: {e}")
+        return set()
+
+    # 清理过期条目
+    cutoff = datetime.now() - timedelta(days=days)
+    valid_history = {}
+    for link, ts_str in history.items():
+        try:
+            # 兼容带/不带时区，统一转为 naive 比较
+            ts = datetime.fromisoformat(ts_str)
+            if ts.tzinfo is not None:
+                ts = ts.astimezone().replace(tzinfo=None)
+            if ts >= cutoff:
+                valid_history[link] = ts_str
+        except Exception:
+            continue
+
+    # 如果有清理，写回文件
+    if len(valid_history) != len(history):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(valid_history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return set(valid_history.keys())
+
+
+def mark_links_as_sent(links: List[str], data_dir: str = "news-data"):
+    """标记链接为已发送，存入 sent-history.json"""
+    if not links:
+        return
+    path = Path(data_dir) / "sent-history.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    history = {}
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            pass
+
+    now_str = datetime.now().isoformat()
+    for link in links:
+        if link:
+            history[link] = now_str
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 保存 sent-history.json 失败: {e}")
+

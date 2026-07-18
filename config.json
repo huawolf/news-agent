@@ -1,0 +1,121 @@
+{
+    "filter": {
+        "min_score": 60,
+        "hot_threshold": 90,
+        "context_days": 2,
+        "keep_days": 7,
+        "push_context_days": 5,
+        "no_content_marker": "[NO_NEW_CONTENT]"
+    },
+    "log": {
+        "retention_days": 7
+    },
+    "schedule": {
+        "fetch_interval_minutes": 60,
+        "fetch_lookback_minutes": 120,
+        "push_cron": ["0 9 * * *"],
+        "timezone_hours": 8
+    },
+    "sections": {
+        "github_trending": {
+            "enabled": true,
+            "max_items": 5,
+            "max_deep_dive": 20,
+            "readme_max_chars": 10000,
+            "history_file": "news-data/trending-history.json",
+            "request_timeout": 10,
+            "tokenName": "GITHUB_TOKEN"
+        },
+        "hackernews": {
+            "enabled": false,
+
+            "select_k": 3,
+            "top_comments": 50,
+            "top_l2_per_l1": 3,
+            "comment_max_chars": 2000,
+            "comments_total_chars": 80000,
+            "link_content_max_chars": 50000,
+            "request_timeout": 10,
+            "algolia_base": "https://hn.algolia.com/api/v1",
+            "jinaTokenName": "JINA_API_KEY"
+        },
+        "insights": {
+            "enabled": true
+        }
+    },
+    "fetch": {
+        "max_workers": 10,
+        "timeout": 10
+    },
+    "llm": {
+        "provider": "openai",
+        "model": "deepseek-v4-flash",
+        "baseUrl": "https://api.deepseek.com",
+        "apiKeyName": "DEEPSEEK_API_KEY",
+        "max_prompt_chars": 150000,
+        "max_concurrent_batches": 3,
+        "prompts": {
+            "score_batch": "prompts/score_batch.md",
+            "immediate_push": "prompts/immediate_push.md",
+            "digest": "prompts/digest.md",
+            "section_github": "prompts/section_github.md",
+            "section_hackernews_select": "prompts/section_hackernews_select.md",
+            "section_hackernews": "prompts/section_hackernews.md",
+            "insights": "prompts/insights.md"
+        }
+    },
+    "push": {
+        "discord": {
+            "enabled": false,
+            "apiKeyName": "DISCORD_WEBHOOK_URL"
+        },
+        "feishu": {
+            "enabled": true,
+            "apiKeyName": "FEISHU_WEBHOOK_URL"
+        }
+    },
+    "sources": {
+        "base_opml": "resources/rss.opml",
+        "add": [
+            {
+                "title": "OpenAI News",
+                "xmlUrl": "https://openai.com/news/rss.xml",
+                "category": "AI"
+            },
+            {
+                "title": "Chrome for Developers",
+                "xmlUrl": "https://developer.chrome.com/static/blog/feed.xml",
+                "category": "Chrome"
+            },
+            {
+                "title": "Cloudflare Developers",
+                "xmlUrl": "https://developers.cloudflare.com/changelog/rss/index.xml",
+                "category": "Cloudflare"
+            },
+            {
+                "title": "Infoq",
+                "xmlUrl": "https://feed.infoq.com/",
+                "category": "News"
+            }
+        ],
+        "block": [
+            {
+                "title": "Google Developers Blog",
+                "xmlUrl": "https://developers.googleblog.com/feeds/posts/default"
+            },
+            {
+                "title": "Microsoft for Developers",
+                "xmlUrl": "https://devblogs.microsoft.com/landing"
+            },
+            {
+                "title": "ElevenLabs Blog",
+                "xmlUrl": "https://api.bestblogs.dev/feed/elevenLabsBlog"
+            },
+            {
+                "title": "Infoq(en)",
+                "xmlUrl": "http://www.infoq.com/rss/rss.action"
+            }
+        ],
+        "block_domains": ["*.substack.com", "*.youtube.com"]
+    }
+}

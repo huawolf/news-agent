@@ -1,0 +1,5 @@
+时间: 2026-06-22
+任务: 修复抓取 Hacker News 首页超时导致空的异常信息报错问题，并优化抓取错误提示。
+涉及文件:
+- src/sections/hackernews/section.py: 在捕获抓取 Hacker News 异常时，如果异常对象的字符串为空（例如 TimeoutError），则回退显示异常类名。
+- src/sections/github/section.py: 同样优化在 GitHub 板块捕获抓取异常时的报错信息，异常对象字符串为空时显示类名。

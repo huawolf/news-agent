@@ -43,6 +43,10 @@ from src.storage import (
     read_entries,
     save_notify_file,
     save_push_file,
+    load_sent_links,
+    mark_links_as_sent,
+    get_last_push_file,
+    extract_push_time,
 )
 
 
@@ -99,6 +103,92 @@ def calculate_push_times(
     return sorted(times)
 
 
+def is_keyword_match(k1: str, k2: str) -> bool:
+    """判定两个关键词是否相似/匹配"""
+    k1_clean = "".join(c for c in k1.lower() if c.isalnum())
+    k2_clean = "".join(c for c in k2.lower() if c.isalnum())
+    
+    if not k1_clean or not k2_clean:
+        return False
+        
+    if k1_clean == k2_clean:
+        return True
+        
+    if len(k1_clean) >= 3 and len(k2_clean) >= 3:
+        if k1_clean in k2_clean or k2_clean in k1_clean:
+            return True
+            
+    return False
+
+
+def count_overlapping_keywords(keywords_a: List[str], keywords_b: List[str]) -> int:
+    """计算两组关键词中重合的数量"""
+    matches = 0
+    matched_in_b = set()
+    
+    for k_a in keywords_a:
+        for k_b in keywords_b:
+            if k_b not in matched_in_b and is_keyword_match(k_a, k_b):
+                matches += 1
+                matched_in_b.add(k_b)
+                break
+                
+    return matches
+
+
+def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
+    """基于关键词相似度去重，与过去 3 天已抓取的新闻进行比对"""
+    tz = get_timezone(config)
+    now = datetime.now(tz)
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    
+    history_entries = []
+    for i in range(3):
+        d = now.date() - timedelta(days=i)
+        fetch_file = get_fetch_file(d, data_dir)
+        if os.path.exists(fetch_file):
+            for entry in read_entries(fetch_file):
+                # 排除被置为 0 分的重复项
+                if entry.get("keywords") and entry.get("score", 0) > 0:
+                    history_entries.append(entry)
+                    
+    print(f"🔍 关键词比对：载入过去 3 天历史新闻 {len(history_entries)} 条")
+    
+    if not history_entries:
+        return
+        
+    duplicate_count = 0
+    for new_entry in new_entries:
+        new_keywords = new_entry.get("keywords")
+        if not new_keywords or not isinstance(new_keywords, list):
+            continue
+            
+        is_dup = False
+        matching_history_title = ""
+        matching_history_link = ""
+        for hist_entry in history_entries:
+            hist_keywords = hist_entry.get("keywords")
+            if not hist_keywords or not isinstance(hist_keywords, list):
+                continue
+                
+            overlap = count_overlapping_keywords(new_keywords, hist_keywords)
+            if overlap >= 5:
+                is_dup = True
+                matching_history_title = hist_entry.get("title", "")
+                matching_history_link = hist_entry.get("link", "")
+                break
+                
+        if is_dup:
+            new_entry["score"] = 0
+            new_entry["is_duplicate"] = True
+            new_entry["duplicate_reason"] = f"与历史新闻《{matching_history_title}》({matching_history_link}) 关键词重合度 >= 5"
+            duplicate_count += 1
+            print(f"🚫 关键词去重命中：【{new_entry.get('title')}】与已发新闻【{matching_history_title}】重合")
+            
+    if duplicate_count > 0:
+        print(f"🚫 关键词去重拦截了 {duplicate_count} 条消息 (score 被置 0)")
+
+
 def is_morning_push(now: datetime, config: Dict) -> bool:
     """判定当前 push 是否为「早报」(触发 GH/HN/insights 三段)。
 
@@ -133,9 +223,11 @@ def collect_entries_for_push(
     逻辑：
     1. 获取 context_days 天内的所有条目
     2. 按 min_score 过滤
-    3. push_time = max(last_push_time, now - 24h)
-    4. 晚于 push_time 的 → 待推送条目
-    5. 早于 push_time 的 → 上下文条目（用于LLM去重参考）
+    3. 加载 sent-history.json 已推送历史
+    4. 过滤掉已推送的链接
+    5. push_time = max(last_push_time, now - 24h)
+    6. 晚于 push_time 的 → 待推送条目
+    7. 早于 push_time 的 → 上下文条目（用于LLM去重参考）
     """
     tz = get_timezone()
     now = datetime.now(tz)
@@ -157,6 +249,10 @@ def collect_entries_for_push(
     qualified_entries = [e for e in all_entries if (e.get("score") or 0) >= min_score]
     print(f"📋 过滤后条目: {len(qualified_entries)} 条 ")
 
+    # 加载已发送历史去重
+    sent_links = load_sent_links(days=3, data_dir=data_dir)
+    print(f"📋 已发送历史库: {len(sent_links)} 条已过滤链接")
+
     # 计算推送时间边界：max(last_push_time, now - 24h)
     past_24h = now - timedelta(hours=24)
     push_cutoff = (
@@ -172,6 +268,10 @@ def collect_entries_for_push(
     CONTEXT_FIELDS = ("title", "source", "score", "summary", "tags", "published")
 
     for entry in qualified_entries:
+        link = entry.get("link")
+        if link and link in sent_links:
+            continue
+
         entry_time = parse_time_to_local(entry.get("fetched_at", ""))
         if entry_time and entry_time > push_cutoff:
             to_push.append(entry)
@@ -204,23 +304,40 @@ async def run_fetch_job(config: Dict):
 
     max_workers = config.get("fetch", {}).get("max_workers", 20)
     timeout = config.get("fetch", {}).get("timeout", 30)
+    
+    # 1. 抓取 RSS 订阅源
     entries = await fetch_all_feeds(
         sources, cutoff, max_workers=max_workers, timeout=timeout
     )
-    print(f"📥 抓取到 {len(entries)} 条原始消息")
+    print(f"📥 抓取到 {len(entries)} 条 RSS 原始消息")
 
-    if not entries:
+    # 2. 并发抓取 Hacker News (不走 Jina Reader 抓取外链，直接读 Algolia 热门评论)
+    hn_entries = []
+    try:
+        from src.fetcher import fetch_hackernews_entries
+        hn_entries = await fetch_hackernews_entries(config)
+        print(f"📥 HN: 抓取到 {len(hn_entries)} 条热门评论富化消息")
+    except Exception as e:
+        print(f"⚠️ HN 抓取失败: {e}")
+
+    # 合并新闻源
+    all_entries = entries + hn_entries
+    print(f"📥 汇总抓取到 {len(all_entries)} 条原始消息")
+
+    if not all_entries:
         return
 
-    for entry in entries:
-        entry["content"] = html_to_markdown(
-            entry.get("content", ""), entry.get("link", "")
-        )
+    # 对非 Hacker News 源的普通 RSS 条目进行 HTML 格式转换
+    for entry in all_entries:
+        if entry.get("source") != "Hacker News":
+            entry["content"] = html_to_markdown(
+                entry.get("content", ""), entry.get("link", "")
+            )
 
     fetch_file = get_fetch_file()
     existing_links = load_existing_links(fetch_file, threshold)
     new_entries = [
-        e for e in entries if e.get("link") and e["link"] not in existing_links
+        e for e in all_entries if e.get("link") and e["link"] not in existing_links
     ]
     print(f"🆕 新消息 {len(new_entries)} 条 | 链接数：{len(existing_links)}")
 
@@ -239,6 +356,9 @@ async def run_fetch_job(config: Dict):
     if score_errors:
         print(f"⚠️ [score_batch] {len(score_errors)} 个错误: {score_errors[0]}")
         await notify_llm_errors("score_batch", score_errors, config)
+
+    # 3. 关键词去重校验
+    deduplicate_by_keywords(scored, config)
 
     is_new_file = not os.path.exists(fetch_file)
     if is_new_file:
@@ -315,6 +435,11 @@ async def run_fetch_job(config: Dict):
             save_notify_file(notify_file, content_without_title, metadata)
             print(f"💾 已保存即时推送到 {notify_file}")
 
+            # 4. 记录已发送链接到 sent-history.json
+            sent_links = [e.get("link") for e in hot_entries if e.get("link")]
+            mark_links_as_sent(sent_links, data_dir=config.get("storage", {}).get("data_dir", "news-data"))
+            print(f"💾 已把 {len(sent_links)} 条快讯链接记录到已发送历史")
+
     print(f"✅ Fetch Job 完成 | 新消息: {len(scored)} 条 | 热点: {len(hot_entries)} 条")
 
 
@@ -361,6 +486,9 @@ async def _run_default_push(config: Dict):
         title="📰 AI Daily 每日精选 | " + metadata["title"],
         metadata=metadata,
     )
+    last_push_file = get_last_push_file()
+    last_push_time = extract_push_time(last_push_file) if last_push_file else None
+
     push_file = get_push_file()
     rss_count = rss_md.count("###")
     save_push_file(
@@ -372,7 +500,26 @@ async def _run_default_push(config: Dict):
         metadata=metadata,
     )
     print(f"💾 已保存到 {push_file}")
+    
+    # 记录已发送历史
+    try:
+        min_score = config["filter"]["min_score"]
+        context_days = config["filter"]["context_days"]
+        data_dir = config.get("storage", {}).get("data_dir", "news-data")
+        to_push, _ = collect_entries_for_push(
+            last_push_time=last_push_time,
+            context_days=context_days,
+            min_score=min_score,
+            data_dir=data_dir,
+        )
+        sent_links = [e.get("link") for e in to_push if e.get("link")]
+        mark_links_as_sent(sent_links, data_dir=data_dir)
+        print(f"💾 已把 {len(sent_links)} 条晚报链接记录到已发送历史")
+    except Exception as e:
+        print(f"⚠️ 记录已发送历史失败: {e}")
+
     print(f"✅ Push Job 完成 | 推送条目: {rss_count}")
+
 
 
 async def _run_morning_push(config: Dict):
@@ -455,12 +602,33 @@ async def _run_morning_push(config: Dict):
         title="📰 AI Daily 每日精选 | " + metadata["title"],
         metadata=metadata,
     )
+    last_push_file = get_last_push_file()
+    last_push_time = extract_push_time(last_push_file) if last_push_file else None
+
     push_file = get_push_file()
     rss_count = rss_md.count("###") if rss_md else 0
     save_push_file(
         push_file, final, rss_count, rss_count, profile="morning", metadata=metadata
     )
     print(f"💾 已保存早报到 {push_file}")
+    
+    # 记录已发送历史
+    try:
+        min_score = config["filter"]["min_score"]
+        context_days = config["filter"]["context_days"]
+        data_dir = config.get("storage", {}).get("data_dir", "news-data")
+        to_push, _ = collect_entries_for_push(
+            last_push_time=last_push_time,
+            context_days=context_days,
+            min_score=min_score,
+            data_dir=data_dir,
+        )
+        sent_links = [e.get("link") for e in to_push if e.get("link")]
+        mark_links_as_sent(sent_links, data_dir=data_dir)
+        print(f"💾 已把 {len(sent_links)} 条早报链接记录到已发送历史")
+    except Exception as e:
+        print(f"⚠️ 记录已发送历史失败: {e}")
+
 
 
 async def fetch_loop(config: Dict):

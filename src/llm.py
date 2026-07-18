@@ -96,7 +96,9 @@ async def check_llm_available(config: Dict, timeout_seconds: int = 15) -> str:
     return response_text
 
 
-def _build_batch_prompt(entries: List[Dict], prompt_path: str = None) -> str:
+def _build_batch_prompt(
+    entries: List[Dict], prompt_path: str = None, preferences: str = ""
+) -> str:
     """构建批量评分prompt"""
     # 构建entries JSON列表（只包含必要字段）
     entries_for_llm = []
@@ -117,7 +119,7 @@ def _build_batch_prompt(entries: List[Dict], prompt_path: str = None) -> str:
     if prompt_path is None:
         prompt_path = "prompts/score_batch.md"
 
-    return load_prompt(prompt_path, entries_json=entries_json)
+    return load_prompt(prompt_path, entries_json=entries_json, preferences=preferences)
 
 
 def _parse_llm_json_response(response: str) -> List[Dict]:
@@ -292,7 +294,9 @@ async def _score_single_batch(
     """对单批entries进行评分"""
     # 从config获取批量评分提示词路径
     prompt_path = config.get("prompts", {}).get("score_batch", "prompts/score_batch.md")
-    prompt = _build_batch_prompt(entries, prompt_path)
+    preferences = config.get("personal_preferences", "")
+    prompt = _build_batch_prompt(entries, prompt_path, preferences=preferences)
+
 
     try:
         response = await call_llm(
@@ -385,10 +389,14 @@ def _merge_scores(entries: List[Dict], scores: List[Dict]) -> List[Dict]:
                 "tags": score_data.get("tags", entry.get("tags", [])),
                 "score": score_value,
                 "summary": score_data.get("summary", entry.get("summary", "")),
+                "quality_score": score_data.get("quality_score", 0),
+                "interest_score": score_data.get("interest_score", 0),
+                "keywords": score_data.get("keywords", []),
             }
         )
 
     return merged
+
 
 
 async def generate_immediate_push(

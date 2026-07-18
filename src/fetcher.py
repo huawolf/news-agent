@@ -20,6 +20,7 @@ NITTER_HOSTS = (
     "xcancel.com",
     "nitter.net",
     "nuku.trabun.org",
+    "nitter.privacyredirect.com",
 )
 NITTER_HEADERS = {
     "User-Agent": "Inoreader",
@@ -213,3 +214,115 @@ async def fetch_all_feeds(
             all_entries.extend(result)
 
     return all_entries
+
+
+async def fetch_hackernews_entries(config: Dict) -> List[Dict]:
+    """获取 Hacker News 首页热门条目并富化内容 (无需 Jina Reader 抓取外链)"""
+    try:
+        from src.sections.hackernews.frontpage_scraper import fetch_frontpage, parse_frontpage_html
+        from src.sections.hackernews.item_enricher import _fetch_algolia_item, _collect_comments_tree
+        from src.processor import html_to_markdown
+    except ImportError as e:
+        print(f"⚠️ HN fetcher 依赖加载失败: {e}")
+        return []
+
+    cfg = config.get("sections", {}).get("hackernews", {})
+    max_items = cfg.get("max_fetch_items", 30)
+    algolia_base = cfg.get("algolia_base", "https://hn.algolia.com/api/v1")
+    top_comments = cfg.get("top_comments", 50)
+    top_l2_per_l1 = cfg.get("top_l2_per_l1", 3)
+    comment_max_chars = cfg.get("comment_max_chars", 2000)
+    comments_total_chars = cfg.get("comments_total_chars", 80000)
+    timeout = cfg.get("request_timeout", 10)
+
+    print("📥 HN: 抓取首页...")
+    try:
+        html = await fetch_frontpage(timeout=timeout)
+        stories = parse_frontpage_html(html)[:max_items]
+    except Exception as e:
+        print(f"⚠️ HN frontpage 抓取失败: {e}")
+        return []
+
+    if not stories:
+        return []
+
+    print(f"📋 HN: 并发获取 {len(stories)} 条 story 的 Algolia 详细内容与热门评论...")
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": "Mozilla/5.0"}, trust_env=True
+    ) as session:
+        tasks = []
+        for s in stories:
+            tasks.append(_fetch_algolia_item(session, s["id"], algolia_base, timeout))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    entries = []
+    for s, res in zip(stories, results):
+        if isinstance(res, Exception) or not res:
+            # Algolia 失败，兜底使用 frontpage 数据
+            pub_date = datetime.now(timezone.utc)
+            content_parts = [
+                f"Points: {s.get('points', 0)} | Comments: {s.get('comments', 0)}"
+            ]
+            if s.get("site"):
+                content_parts.insert(0, f"Domain: {s['site']}")
+            content = "\n".join(content_parts)
+        else:
+            # 提取创建时间作为发布时间
+            created_at = res.get("created_at")
+            if created_at:
+                try:
+                    pub_date = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                except ValueError:
+                    pub_date = datetime.now(timezone.utc)
+            else:
+                pub_date = datetime.now(timezone.utc)
+
+            # 提取评论树
+            comments_tree = _collect_comments_tree(
+                res,
+                top_comments=top_comments,
+                top_l2_per_l1=top_l2_per_l1,
+                comment_max_chars=comment_max_chars,
+                comments_total_chars=comments_total_chars,
+            )
+
+            # 拼装内容
+            content_parts = []
+            if s.get("site"):
+                content_parts.append(f"Domain: {s['site']}")
+            content_parts.append(f"Points: {s.get('points', 0)} | Comments: {s.get('comments', 0)}")
+            
+            post_text = res.get("text")
+            if post_text:
+                content_parts.append("")
+                content_parts.append("## Post Text")
+                content_parts.append(html_to_markdown(post_text))
+
+            if comments_tree:
+                content_parts.append("")
+                content_parts.append("[Top Comments]")
+                for c in comments_tree:
+                    l1_text = c.get("l1", "").strip()
+                    if l1_text:
+                        content_parts.append(f"- {l1_text}")
+                        for r in c.get("replies", []):
+                            r_text = r.strip()
+                            if r_text:
+                                content_parts.append(f"  - {r_text}")
+
+            content = "\n".join(content_parts)
+
+        entries.append({
+            "title": s["title"],
+            "link": s["url"],  # 统一使用源链接 (如果是 Ask/Show HN，则是 HN 帖子链接)
+            "published": pub_date,
+            "source": "Hacker News",
+            "content": content,
+            "tags": [],
+            "score": 0,
+            "summary": "",
+        })
+
+    return entries
+

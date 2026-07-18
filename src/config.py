@@ -45,7 +45,14 @@ def load_config(config_path: str = "config.json") -> Dict:
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+
+    # 注入个人兴趣偏好环境变量
+    import os
+    config["personal_preferences"] = os.environ.get("PERSONAL_PREFERENCES", "").strip()
+
+    return config
+
 
 
 def parse_opml(opml_path: str) -> List[Dict]:
