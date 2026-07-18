@@ -18,12 +18,13 @@ build/
 .venv
 .DS_Store
 
+
 # 测试
 .pytest_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-tests/news-data/
+tests/
 
 # IDE
 .idea/
