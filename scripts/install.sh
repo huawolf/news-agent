@@ -76,13 +76,17 @@ run_uv sync
 echo "✓ 依赖已就绪"
 echo ""
 
-# ─── [2/6] 验证 .env ────────────────────────────────────────
-echo "🔐 [2/6] 验证 .env..."
+# ─── [2/6] 验证 .env 和 config.json ─────────────────────────
+echo "🔐 [2/6] 验证 .env 和 config.json..."
 if [[ ! -f "$PROJECT_DIR/.env" ]]; then
     echo "❌ .env 不存在，请先复制 .env.example 并填入 API Key"
     exit 1
 fi
-echo "✓ .env 存在"
+if [[ ! -f "$PROJECT_DIR/config.json" ]]; then
+    echo "❌ config.json 不存在，请从模板复制并修改：cp config.json.example config.json"
+    exit 1
+fi
+echo "✓ 配置文件存在"
 echo ""
 
 # ─── [3/6] LLM 健康检查 ─────────────────────────────────────

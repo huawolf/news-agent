@@ -19,7 +19,7 @@ load_dotenv()
 
 from src.config import get_timezone, load_config, merge_sources
 from src.fetcher import fetch_all_feeds
-from src.processor import html_to_markdown
+from src.processor import html_to_markdown, is_daily_newsletter_entry
 from src.storage import append_entries, get_fetch_file, load_existing_links
 
 
@@ -146,6 +146,15 @@ async def fetch_news():
         entry["content"] = html_to_markdown(
             entry.get("content", ""), entry.get("link", "")
         )
+
+    # 过滤掉日报/聚合新闻
+    filtered_entries = []
+    for e in entries:
+        if is_daily_newsletter_entry(e):
+            print(f"🚫 过滤日报/聚合新闻条目: 【{e.get('title')}】")
+        else:
+            filtered_entries.append(e)
+    entries = filtered_entries
 
     # 7. 保存到文件
     print(f"\n💾 保存到文件...")

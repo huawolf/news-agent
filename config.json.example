@@ -71,6 +71,11 @@
         "feishu": {
             "enabled": true,
             "apiKeyName": "FEISHU_WEBHOOK_URL"
+        },
+        "custom": {
+            "enabled": false,
+            "apiKeyName": "CUSTOM_PUSH_URL",
+            "tokenKeyName": "CUSTOM_PUSH_TOKEN"
         }
     },
     "sources": {

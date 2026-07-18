@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from processor import html_to_markdown
+from processor import html_to_markdown, is_daily_newsletter_entry
 
 
 class TestHtmlToMarkdown:
@@ -85,3 +85,43 @@ class TestHtmlToMarkdown:
         result = html_to_markdown(html)
         assert "Hello" in result
         assert "World" in result
+
+
+class TestIsDailyNewsletterEntry:
+    """测试是否为日报/周报等聚合类内容"""
+
+    def test_normal_entry(self):
+        entry = {
+            "title": "Kimi K3 Release",
+            "content": "Moonshot launched Kimi K3, which has a 200k context window and great coding capability.",
+        }
+        assert not is_daily_newsletter_entry(entry)
+
+    def test_meta_headers_newsletter(self):
+        entry = {
+            "title": "Random news digest",
+            "content": 'title: "iOS 27 公测版推送"\nlead: "苹果推送 iOS 27 公测版"\nhighlights:\n- "iOS 27 公测版发布"\n\nSome other content here.',
+        }
+        assert is_daily_newsletter_entry(entry)
+
+    def test_meta_headers_chinese_colon(self):
+        entry = {
+            "title": "Another digest",
+            "content": 'title："iOS 27 公测版推送"\nlead："苹果推送 iOS 27 公测版"\nhighlights：\n- "iOS 27 公测版发布"',
+        }
+        assert is_daily_newsletter_entry(entry)
+
+    def test_title_contains_daily_keyword(self):
+        entry = {
+            "title": "AI Daily 每日精选 | 2026-07-18",
+            "content": "A list of news articles of today.",
+        }
+        assert is_daily_newsletter_entry(entry)
+
+    def test_title_contains_chinese_daily_keyword(self):
+        entry = {
+            "title": "今日日报和快讯",
+            "content": "News summary content.",
+        }
+        assert is_daily_newsletter_entry(entry)
+

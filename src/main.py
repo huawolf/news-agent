@@ -24,7 +24,7 @@ from src.llm import (
     parse_immediate_push_with_metadata,
     score_batch,
 )
-from src.processor import html_to_markdown
+from src.processor import html_to_markdown, is_daily_newsletter_entry
 from src.push import send_to_platforms
 from src.sections.github.section import run_github_section
 from src.sections.hackernews.section import run_hackernews_section
@@ -336,9 +336,15 @@ async def run_fetch_job(config: Dict):
 
     fetch_file = get_fetch_file()
     existing_links = load_existing_links(fetch_file, threshold)
-    new_entries = [
-        e for e in all_entries if e.get("link") and e["link"] not in existing_links
-    ]
+    
+    new_entries = []
+    for e in all_entries:
+        if e.get("link") and e["link"] not in existing_links:
+            if is_daily_newsletter_entry(e):
+                print(f"🚫 过滤日报/聚合新闻条目: 【{e.get('title')}】")
+            else:
+                new_entries.append(e)
+                
     print(f"🆕 新消息 {len(new_entries)} 条 | 链接数：{len(existing_links)}")
 
     if not new_entries:

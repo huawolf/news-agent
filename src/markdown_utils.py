@@ -50,20 +50,49 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
     返回 (metadata_dict, body)。无 frontmatter / YAML 解析失败 / 非 dict 时返回
     ({}, 原文) —— 保证降级路径不丢内容,调用方可凭 metadata_dict 是否为空判定。
     """
-    match = _FRONTMATTER_RE.match(text.strip())
-    if not match:
-        return {}, text
+    text_stripped = text.strip()
+    match = _FRONTMATTER_RE.match(text_stripped)
+    if match:
+        try:
+            meta = yaml.safe_load(match.group(1)) or {}
+            if isinstance(meta, dict):
+                return meta, match.group(2).strip()
+        except yaml.YAMLError:
+            pass
 
-    try:
-        meta = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError:
-        print("frontmatter 数据段解析失败")
-        return {}, text
+    # 宽松解析：处理模型直接输出 key: value 元数据且不带 --- 包围的情况
+    lines = text_stripped.split("\n")
+    if lines:
+        first_line = lines[0].strip()
+        meta_keys = ("title:", "title：", "lead:", "lead：", "highlights:", "highlights：")
+        if any(first_line.lower().startswith(k) for k in meta_keys):
+            yaml_lines = []
+            body_lines = []
+            in_body = False
+            for line in lines:
+                if not in_body:
+                    stripped_line = line.strip()
+                    # 识别到正文的起始标志
+                    if stripped_line.startswith(("#", "###", "##", "1. ", "### 1.")):
+                        in_body = True
+                        body_lines.append(line)
+                    else:
+                        yaml_lines.append(line)
+                else:
+                    body_lines.append(line)
+            
+            if yaml_lines and body_lines:
+                # 统一替换中文冒号为英文冒号+空格，并确保所有 YAML 键的冒号后有空格
+                yaml_content = "\n".join(yaml_lines).replace("：", ": ")
+                yaml_content = re.sub(r"^(\s*\w+):([^\s])", r"\1: \2", yaml_content, flags=re.MULTILINE)
+                try:
+                    meta = yaml.safe_load(yaml_content) or {}
+                    if isinstance(meta, dict) and any(k in meta for k in ("title", "lead", "highlights")):
+                        return meta, "\n".join(body_lines).strip()
+                except yaml.YAMLError:
+                    pass
 
-    if not isinstance(meta, dict):
-        return {}, text
-
-    return meta, match.group(2).strip()
+    return {}, text
 
 
 def normalize_str_list(value: Any) -> List[str]:
