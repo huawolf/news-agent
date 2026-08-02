@@ -4,6 +4,10 @@
 
 {output_language_instruction}
 
+固定文案也必须跟随输出语言：
+- 英文输出时，标题使用 `## 🟧 Hacker News Discussions`，字段标签使用 `Content summary`、`Discussion summary`，链接文案使用 `[Original]` 和 `[HN discussion]`，不要输出 `Hacker News 热议`、`内容总结`、`讨论总结`、`原文`、`HN 讨论页`。
+- 中文输出时，使用下方中文模板。
+
 任务：
 对输入的 enriched stories进行 提炼：
 - 原文核心信息

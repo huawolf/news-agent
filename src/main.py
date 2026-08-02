@@ -76,6 +76,30 @@ def now_local(config: Dict = None) -> datetime:
     return datetime.now(get_timezone(config))
 
 
+def _is_english_output(config: Dict) -> bool:
+    return config.get("output_language") == "en"
+
+
+def _daily_title_prefix(config: Dict) -> str:
+    return "📰 News Agent Daily Brief | " if _is_english_output(config) else "📰 News Agent 每日精选 | "
+
+
+def _default_digest_title(config: Dict, date_str: str) -> str:
+    return (
+        f"🌙 News Agent Evening Brief | {date_str}"
+        if _is_english_output(config)
+        else f"🌙 News Agent 晚报 | {date_str}"
+    )
+
+
+def _default_morning_title(config: Dict, date_str: str) -> str:
+    return (
+        f"📰 News Agent Daily Brief | {date_str}"
+        if _is_english_output(config)
+        else f"📰 News Agent 每日精选 | {date_str}"
+    )
+
+
 def parse_time_to_local(time_str: str, config: Dict = None) -> Optional[datetime]:
     """解析时间字符串为配置时区的datetime"""
     try:
@@ -352,7 +376,7 @@ async def run_fetch_job(config: Dict):
     print(f"{'=' * 50}")
 
     interval = config["schedule"]["fetch_interval_minutes"]
-    lookback = config["schedule"].get("fetch_lookback_minutes", 120)
+    lookback = config["schedule"].get("fetch_lookback_minutes", 1440)
     lookback = max(lookback, interval)
     threshold = lookback + interval
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback)
@@ -377,14 +401,30 @@ async def run_fetch_job(config: Dict):
     hn_entries = []
     try:
         from src.fetcher import fetch_hackernews_entries
-        hn_entries = await fetch_hackernews_entries(config)
+        hn_entries = await fetch_hackernews_entries(config, cutoff_time=cutoff)
         print(f"📥 HN: 抓取到 {len(hn_entries)} 条热门评论富化消息")
     except Exception as e:
         print(f"⚠️ HN 抓取失败: {e}")
 
     # 合并新闻源
-    all_entries = entries + hn_entries
-    print(f"📥 汇总抓取到 {len(all_entries)} 条原始消息")
+    raw_all_entries = entries + hn_entries
+
+    # 二次校验：丢弃任何发布时间早于 24 小时前 (cutoff) 的新闻
+    all_entries = []
+    for e in raw_all_entries:
+        pub = e.get("published")
+        if pub and isinstance(pub, datetime):
+            # 统一转换成 utc 比较
+            if pub.tzinfo is None:
+                pub_utc = pub.replace(tzinfo=timezone.utc)
+            else:
+                pub_utc = pub.astimezone(timezone.utc)
+            if pub_utc < cutoff:
+                print(f"🕒 过滤非24小时内过远新闻: 【{e.get('title')}】({pub})")
+                continue
+        all_entries.append(e)
+
+    print(f"📥 汇总抓取到 {len(all_entries)} 条原始消息（已排除 >24h 旧闻）")
 
     if not all_entries:
         return
@@ -557,7 +597,7 @@ async def _run_default_push(config: Dict):
     if not metadata:
         date_str = now.strftime("%Y-%m-%d")
         metadata = {
-            "title": f"🌙 News Agent 晚报 | {date_str}",
+            "title": _default_digest_title(config, date_str),
             "lead": "",
             "highlights": [],
             "profile": "default",
@@ -568,7 +608,7 @@ async def _run_default_push(config: Dict):
     await send_to_platforms(
         rss_md,
         config["push"],
-        title="📰 News Agent 每日精选 | " + metadata["title"],
+        title=_daily_title_prefix(config) + metadata["title"],
         metadata=metadata,
     )
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
@@ -657,7 +697,7 @@ async def _run_morning_push(config: Dict):
         fallback = digest_meta or {}
         digest_title = fallback.get("title", "")
 
-        title = digest_title if digest_title else f"📰 News Agent 每日精选 | {date_str}"
+        title = digest_title if digest_title else _default_morning_title(config, date_str)
         metadata = {
             "date": date_str,
             "pushTime": now.isoformat(),
@@ -688,7 +728,7 @@ async def _run_morning_push(config: Dict):
     await send_to_platforms(
         final,
         config["push"],
-        title="📰 News Agent 每日精选 | " + metadata["title"],
+        title=_daily_title_prefix(config) + metadata["title"],
         metadata=metadata,
     )
     data_dir = config.get("storage", {}).get("data_dir", "news-data")

@@ -23,7 +23,7 @@ It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio M
 - [uv](https://docs.astral.sh/uv/)
 - An OpenAI-compatible LLM API key
 
-The Windows installer installs `uv` for the current user when it is not already available. On macOS and Linux, install `uv` first.
+The installer scripts for macOS, Linux, and Windows will automatically install `uv` for the current user if it is not already available.
 
 ## Install
 

@@ -67,7 +67,10 @@ def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> st
         "Output language: English. All user-visible content, including YAML frontmatter values, "
         "Markdown headings, summaries, highlights, labels, and analysis, must be written in English. "
         "Translate fixed section headings and labels into natural English. Keep product names, company names, "
-        "model names, repository names, URLs, and code identifiers unchanged."
+        "model names, repository names, URLs, and code identifiers unchanged. "
+        "Do not output Chinese fixed labels. Use '[Read original]' instead of '[查看原文]'; "
+        "use '## Today’s Insights' instead of '## 今日洞察'; use '## ⭐ GitHub Trends' instead of "
+        "'## ⭐ GitHub 趋势'; use 'Daily Brief' or 'Daily Highlights' instead of '每日精选'."
     )
 
 
@@ -650,7 +653,7 @@ def parse_insights_with_metadata(llm_output: str, date: str) -> Tuple[str, Dict]
     insights_md = body if meta else llm_output
 
     metadata = {
-        "title": meta.get("title") or f"📰 News Agent 每日精选 | {date}",
+        "title": meta.get("title") or f"📰 News Agent Daily Brief | {date}",
         "excerpt": meta.get("excerpt", ""),
         "seotitle": meta.get("seotitle", ""),
         "seodescription": meta.get("seodescription", ""),
@@ -672,7 +675,7 @@ def parse_digest_with_metadata(llm_output: str, date: str) -> Tuple[str, Dict]:
     digest_md = body if meta else llm_output
 
     metadata = {
-        "title": meta.get("title") or f"🌙 News Agent 晚报 | {date}",
+        "title": meta.get("title") or f"🌙 News Agent Evening Brief | {date}",
         "lead": meta.get("lead", ""),
         "highlights": normalize_str_list(meta.get("highlights")),
         "profile": "default",

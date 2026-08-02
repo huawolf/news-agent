@@ -46,15 +46,8 @@ async def run_github_section(
     if not all_repos:
         return "", None
 
-    # 2. history 加载 + 清理
+    # 2. history 加载 (保留永久历史记录，确保历史上处理/发送过的 repo 不重复发送)
     history = load_trending_history(history_path)
-    before_cleanup = len(history.repos)
-    history.cleanup(today=today, keep_days=keep_days)
-    after_cleanup = len(history.repos)
-    if before_cleanup != after_cleanup:
-        print(
-            f"🧹 GH: history 清理过期 {before_cleanup - after_cleanup} 条 (剩 {after_cleanup})"
-        )
 
     # 3. 候选筛选(按 spec §4.3 语义)
     candidates = []

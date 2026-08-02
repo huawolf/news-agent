@@ -5,6 +5,10 @@
 
 {output_language_instruction}
 
+固定文案也必须跟随输出语言：
+- 英文输出时，标题使用 `## ⭐ GitHub Trends`，表格标题使用 `Category snapshot`，字段标签使用 `Language / License`、`Total stars`、`Repository`、`Project positioning`，不要输出 `GitHub 趋势`、`类别速览`、`语言/许可`、`总 Stars`、`仓库`、`项目定位`。
+- 中文输出时，使用下方中文模板。
+
 目标读者：
 - AI 开发者
 - 独立开发者 / SaaS 创业者
@@ -110,7 +114,7 @@
 
 ```
 
-若候选中没有任何符合关注领域的项目,直接输出 `## ⭐ GitHub 趋势\n\n- 今日无显著 AI 相关趋势`,不要硬编。
+若候选中没有任何符合关注领域的项目：英文输出 `## ⭐ GitHub Trends\n\n- No notable AI-related trends today`；中文输出 `## ⭐ GitHub 趋势\n\n- 今日无显著 AI 相关趋势`。不要硬编。
 
 
 ## 候选数据

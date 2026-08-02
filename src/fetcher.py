@@ -84,9 +84,9 @@ def _parse_feed_entries(content, feed_info: Dict, cutoff_time: datetime) -> List
     for entry in feed.entries:
         pub_date = parse_entry_time(entry)
 
-        # RSS 通常按时间倒序排列，一旦发现过期直接跳出
+        # 过滤超过 cutoff 时间的过远消息
         if pub_date and pub_date < cutoff_time:
-            break
+            continue
 
         entries.append(
             {
@@ -216,7 +216,9 @@ async def fetch_all_feeds(
     return all_entries
 
 
-async def fetch_hackernews_entries(config: Dict) -> List[Dict]:
+async def fetch_hackernews_entries(
+    config: Dict, cutoff_time: Optional[datetime] = None
+) -> List[Dict]:
     """获取 Hacker News 首页热门条目并富化内容 (无需 Jina Reader 抓取外链)"""
     try:
         from src.sections.hackernews.frontpage_scraper import fetch_frontpage, parse_frontpage_html
@@ -277,6 +279,10 @@ async def fetch_hackernews_entries(config: Dict) -> List[Dict]:
                     pub_date = datetime.now(timezone.utc)
             else:
                 pub_date = datetime.now(timezone.utc)
+
+            # 时间过滤：丢弃超过 cutoff 时间的过远消息
+            if cutoff_time and pub_date < cutoff_time:
+                continue
 
             # 提取评论树
             comments_tree = _collect_comments_tree(

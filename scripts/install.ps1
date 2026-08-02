@@ -10,14 +10,30 @@ function Get-UvCommand {
     $command = Get-Command uv -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
 
-    Write-Host "uv was not found. Installing it for the current user..."
-    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-    $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
-    $command = Get-Command uv -ErrorAction SilentlyContinue
-    if (-not $command) {
-        throw "uv installation completed but uv is not on PATH. Open a new PowerShell window and rerun this script."
+    $localBin = Join-Path $env:USERPROFILE ".local\bin"
+    $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+
+    foreach ($dir in @($localBin, $cargoBin)) {
+        $exe = Join-Path $dir "uv.exe"
+        if (Test-Path $exe) {
+            $env:Path = "$dir;$env:Path"
+            return $exe
+        }
     }
-    return $command.Source
+
+    Write-Host "uv was not found. Installing uv for the current user..."
+    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+
+    $env:Path = "$localBin;$cargoBin;$env:Path"
+    $command = Get-Command uv -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    foreach ($dir in @($localBin, $cargoBin)) {
+        $exe = Join-Path $dir "uv.exe"
+        if (Test-Path $exe) { return $exe }
+    }
+
+    throw "uv installation completed, but uv executable was not found on PATH or standard install locations. Please restart PowerShell and rerun this script."
 }
 
 $Uv = Get-UvCommand

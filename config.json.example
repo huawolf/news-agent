@@ -13,7 +13,7 @@
     },
     "schedule": {
         "fetch_interval_minutes": 60,
-        "fetch_lookback_minutes": 120,
+        "fetch_lookback_minutes": 1440,
         "push_cron": ["0 8 * * *", "0 17 * * *"],
         "timezone_hours": 8
     },

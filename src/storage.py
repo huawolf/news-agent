@@ -470,48 +470,39 @@ def cleanup_old_files(days: int = 7, data_dir: str = "news-data"):
             except (ValueError, OSError):
                 continue
 
-    # trending-history.json: 剪枝过期条目,保留文件本身
-    trending_path = data_path / "trending-history.json"
-    if trending_path.exists() and trending_path.stat().st_size > 0:
-        try:
-            history = load_trending_history(str(trending_path))
-            before = len(history.repos)
-            history.cleanup(today=datetime.now().date(), keep_days=days)
-            after = len(history.repos)
-            if after < before:
-                history.save()
-                print(f"   ✂️ trending-history 剪枝: {before} → {after} 条")
-        except Exception as e:
-            print(f"   ⚠️ trending-history 剪枝失败: {e}")
+    # trending-history.json: 保持永久历史记录,不再剪枝过期条目
 
     if deleted_count > 0:
         print(f"   ✅ 清理完成: 删除了 {deleted_count} 个旧文件")
+
+
+def _normalize_url(url: str) -> str:
+    """规范化 repo URL：转小写并去除末尾斜杠"""
+    return (url or "").strip().lower().rstrip("/")
 
 
 class TrendingHistory:
     """GitHub trending 已查阅 repo 索引。
 
     repos 字段:url → last_seen_date (ISO YYYY-MM-DD)。
-    每次早报 cleanup 一次,touch 完所有今日 URL 后 save。
+    保持永久历史记录，确保历史上处理/发送过的 repo 不再重复发送。
     """
 
     def __init__(self, path: str, repos: Dict[str, str]):
         self._path = path
-        self.repos: Dict[str, str] = dict(repos)
+        self.repos: Dict[str, str] = {
+            _normalize_url(u): d for u, d in (repos or {}).items()
+        }
 
     def __contains__(self, url: str) -> bool:
-        return url in self.repos
+        return _normalize_url(url) in self.repos
 
     def touch(self, url: str, today: date) -> None:
-        self.repos[url] = today.isoformat()
+        self.repos[_normalize_url(url)] = today.isoformat()
 
-    def cleanup(self, today: date, keep_days: int) -> None:
-        cutoff = today - timedelta(days=keep_days)
-        self.repos = {
-            url: d
-            for url, d in self.repos.items()
-            if _parse_iso_date_safe(d) is not None and _parse_iso_date_safe(d) >= cutoff
-        }
+    def cleanup(self, today: date = None, keep_days: Optional[int] = None) -> None:
+        """为实现历史上已发/已处理的不重复发送,History 保留永久记录,不再剪枝"""
+        pass
 
     def save(self) -> None:
         path = Path(self._path)

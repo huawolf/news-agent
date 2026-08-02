@@ -5,10 +5,29 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv is required. Install it from https://docs.astral.sh/uv/ and rerun this script."
-    exit 1
-fi
+ensure_uv() {
+    if command -v uv >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -f "$HOME/.local/bin/uv" ]]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v uv >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    echo "uv was not found. Installing uv for the current user..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "uv installation completed, but 'uv' command was not found on PATH."
+        echo "Please restart your shell session or add \$HOME/.local/bin to your PATH, then rerun this script."
+        exit 1
+    fi
+}
+
+ensure_uv
 
 if [[ ! -f .env ]]; then
     cp .env.example .env
