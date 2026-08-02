@@ -37,7 +37,7 @@ def html_to_markdown(html: str, base_url: str = "") -> str:
     return markdown.strip()
 
 
-def is_daily_newsletter_entry(entry: dict) -> bool:
+def is_own_digest_entry(entry: dict) -> bool:
     """
     判断条目是否为聚合类的日报/周报等，通过元数据头部（如 title:, lead:, highlights:）或标题关键字识别。
     """
@@ -57,10 +57,9 @@ def is_daily_newsletter_entry(entry: dict) -> bool:
         return True
 
     # 2. 检查标题中是否含有明显的日报关键字
-    daily_keywords = ["ai daily", "每日精选", "每日晚报", "每日快讯", "每日资讯", "每日早报", "日报"]
+    daily_keywords = ["news agent", "每日精选", "每日晚报", "每日快讯", "每日资讯", "每日早报", "日报"]
     for kw in daily_keywords:
         if kw in title_lower:
             return True
 
     return False
-

@@ -29,7 +29,8 @@ class DiscordPlatform(PushPlatform):
         full_content = f"# {title}\n\n{content}" if title else content
         chunks = self._split_content(full_content, limit=2000)
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        timeout = aiohttp.ClientTimeout(total=int(self.config.get("request_timeout", 30)))
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             for chunk in chunks:
                 payload = {"content": chunk}
                 async with session.post(self.webhook_url, json=payload) as resp:

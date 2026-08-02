@@ -1,4 +1,5 @@
 {
+    "output_language": "en",
     "filter": {
         "min_score": 60,
         "hot_threshold": 90,
@@ -15,6 +16,29 @@
         "fetch_lookback_minutes": 120,
         "push_cron": ["0 8 * * *", "0 17 * * *"],
         "timezone_hours": 8
+    },
+    "personal_preferences": "Prioritize practical AI agent, LLM inference, and developer tooling news. Prefer primary sources and concise technical coverage.",
+    "delivery": {
+        "timezone": "Asia/Shanghai",
+        "schedules": [
+            {
+                "id": "morning",
+                "cron": "0 8 * * *",
+                "max_items": 8,
+                "sections": ["rss", "github", "hackernews", "insights"]
+            },
+            {
+                "id": "evening",
+                "cron": "0 17 * * *",
+                "max_items": 5,
+                "sections": ["rss"]
+            }
+        ],
+        "immediate": {
+            "enabled": true,
+            "threshold": 90,
+            "daily_limit": 3
+        }
     },
     "sections": {
         "github_trending": {
@@ -51,7 +75,8 @@
         "model": "deepseek-v4-flash",
         "baseUrl": "https://api.deepseek.com",
         "apiKeyName": "DEEPSEEK_API_KEY",
-        "max_prompt_chars": 150000,
+        "request_timeout": 120,
+        "max_prompt_chars": 30000,
         "max_concurrent_batches": 3,
         "prompts": {
             "score_batch": "prompts/score_batch.md",

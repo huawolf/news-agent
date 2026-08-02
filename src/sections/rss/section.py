@@ -15,7 +15,7 @@ from src.storage import (
 
 
 async def run_rss_section(
-    config: Dict, now: Optional[datetime] = None
+    config: Dict, now: Optional[datetime] = None, max_items: Optional[int] = None
 ) -> Tuple[str, Optional[Dict], Optional[str]]:
     """生成 RSS digest markdown 段(不含 sentinel)。
 
@@ -29,7 +29,8 @@ async def run_rss_section(
     # 延迟 import 避免循环:Task 20-21 后 main.py 会反向 import run_rss_section
     from src.main import collect_entries_for_push
 
-    last_push_file = get_last_push_file()
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    last_push_file = get_last_push_file(data_dir)
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
     min_score = config["filter"]["min_score"]
@@ -39,6 +40,9 @@ async def run_rss_section(
         last_push_time=last_push_time,
         context_days=context_days,
         min_score=min_score,
+        data_dir=data_dir,
+        preferences=config.get("preferences"),
+        max_items=max_items,
     )
 
     if not to_push:
@@ -46,7 +50,7 @@ async def run_rss_section(
         return "", None, None
 
     push_context_days = config["filter"].get("push_context_days", 5)
-    recent = load_recent_push_content(push_context_days)
+    recent = load_recent_push_content(push_context_days, data_dir=data_dir)
 
     try:
         raw = await compose_digest(

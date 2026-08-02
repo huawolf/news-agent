@@ -28,7 +28,8 @@ class FeishuPlatform(PushPlatform):
         """发送到飞书（忽略 metadata）"""
         chunks = self._split_content(content, limit=8000)
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        timeout = aiohttp.ClientTimeout(total=int(self.config.get("request_timeout", 30)))
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             for chunk in chunks:
                 payload = self._build_payload(chunk, title)
                 async with session.post(self.webhook_url, json=payload) as resp:

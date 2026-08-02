@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.markdown_utils import normalize_str_list, parse_frontmatter
+
+logger = logging.getLogger("news_agent.llm")
 
 
 def load_prompt(prompt_path: str, **kwargs) -> str:
@@ -35,6 +38,37 @@ def load_prompt(prompt_path: str, **kwargs) -> str:
     )
 
     return template
+
+
+def _output_language(config: Dict) -> str:
+    return "zh" if config.get("output_language") == "zh" else "en"
+
+
+def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> str:
+    if _output_language(config) == "zh":
+        if json_mode:
+            return (
+                "Output language: Simplified Chinese. Keep JSON keys exactly as specified. "
+                "Write all natural-language values such as summary, tags, and keywords in Simplified Chinese, "
+                "except product names, company names, model names, repository names, and URLs."
+            )
+        return (
+            "Output language: Simplified Chinese. All user-visible content, including YAML frontmatter values, "
+            "Markdown headings, summaries, highlights, labels, and analysis, must be written in Simplified Chinese. "
+            "Keep product names, company names, model names, repository names, URLs, and code identifiers unchanged."
+        )
+    if json_mode:
+        return (
+            "Output language: English. Keep JSON keys exactly as specified. "
+            "Write all natural-language values such as summary, tags, and keywords in English, "
+            "except product names, company names, model names, repository names, and URLs."
+        )
+    return (
+        "Output language: English. All user-visible content, including YAML frontmatter values, "
+        "Markdown headings, summaries, highlights, labels, and analysis, must be written in English. "
+        "Translate fixed section headings and labels into natural English. Keep product names, company names, "
+        "model names, repository names, URLs, and code identifiers unchanged."
+    )
 
 
 async def call_llm(
@@ -66,7 +100,8 @@ async def call_llm(
 
     url = f"{base_url}/chat/completions"
 
-    async with aiohttp.ClientSession(trust_env=True) as session:
+    timeout = aiohttp.ClientTimeout(total=int(config.get("request_timeout", 120)))
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status != 200:
                 text = await resp.text()
@@ -97,7 +132,10 @@ async def check_llm_available(config: Dict, timeout_seconds: int = 15) -> str:
 
 
 def _build_batch_prompt(
-    entries: List[Dict], prompt_path: str = None, preferences: str = ""
+    entries: List[Dict],
+    prompt_path: str = None,
+    preferences: str = "",
+    output_language_instruction: str = "",
 ) -> str:
     """构建批量评分prompt"""
     # 构建entries JSON列表（只包含必要字段）
@@ -119,7 +157,12 @@ def _build_batch_prompt(
     if prompt_path is None:
         prompt_path = "prompts/score_batch.md"
 
-    return load_prompt(prompt_path, entries_json=entries_json, preferences=preferences)
+    return load_prompt(
+        prompt_path,
+        entries_json=entries_json,
+        preferences=preferences,
+        output_language_instruction=output_language_instruction,
+    )
 
 
 def _parse_llm_json_response(response: str) -> List[Dict]:
@@ -295,7 +338,12 @@ async def _score_single_batch(
     # 从config获取批量评分提示词路径
     prompt_path = config.get("prompts", {}).get("score_batch", "prompts/score_batch.md")
     preferences = config.get("personal_preferences", "")
-    prompt = _build_batch_prompt(entries, prompt_path, preferences=preferences)
+    prompt = _build_batch_prompt(
+        entries,
+        prompt_path,
+        preferences=preferences,
+        output_language_instruction=_output_language_instruction(config, json_mode=True),
+    )
 
 
     try:
@@ -310,7 +358,14 @@ async def _score_single_batch(
         return _reconcile_batch_results(entries, results, batch_index)
 
     except Exception as e:
-        error_message = f"批次{batch_index + 1} 评分失败: {e}"
+        detail = str(e) or e.__class__.__name__
+        error_message = f"批次{batch_index + 1} 评分失败: {detail}"
+        logger.exception(
+            "LLM scoring batch failed batch=%s entries=%s error_type=%s",
+            batch_index + 1,
+            len(entries),
+            e.__class__.__name__,
+        )
         print(f"⚠️ {error_message}")
         return [], [error_message]
 
@@ -334,7 +389,10 @@ async def score_batch(
 
     # 分批
     batches = _split_entries_for_batch(entries, max_prompt_chars)
-    print(f"📦 分成 {len(batches)} 个批次评分 (共 {len(entries)} 条)")
+    print(
+        f"📦 分成 {len(batches)} 个批次评分 (共 {len(entries)} 条, "
+        f"max_prompt_chars={max_prompt_chars})"
+    )
 
     # 如果只有一批，直接处理
     if len(batches) == 1:
@@ -419,6 +477,7 @@ async def generate_immediate_push(
         count=len(entries),
         entries=json.dumps(entries, ensure_ascii=False, indent=2),
         recent_push_context=recent_push_context,
+        output_language_instruction=_output_language_instruction(config),
     )
 
     try:
@@ -464,6 +523,7 @@ async def compose_digest(
         context="\n\n".join(context_text),
         recent_push_context=recent_push_context,
         date=datetime.now().strftime("%Y-%m-%d"),
+        output_language_instruction=_output_language_instruction(config),
     )
 
     try:
@@ -486,6 +546,7 @@ async def summarize_github_trending(
         prompt_path,
         repos_json=json.dumps(enriched_repos, ensure_ascii=False, indent=2),
         max_items=max_items,
+        output_language_instruction=_output_language_instruction(config),
     )
     try:
         return await call_llm(prompt, config), None
@@ -549,6 +610,7 @@ async def summarize_hackernews(
     prompt = load_prompt(
         prompt_path,
         stories_json=json.dumps(enriched_stories, ensure_ascii=False, indent=2),
+        output_language_instruction=_output_language_instruction(config),
     )
     try:
         return await call_llm(prompt, config), None
@@ -568,6 +630,7 @@ async def generate_trend_insights(
         rss=sections.get("rss", ""),
         github=sections.get("github", ""),
         hackernews=sections.get("hackernews", ""),
+        output_language_instruction=_output_language_instruction(config),
     )
     try:
         return await call_llm(prompt, config), None
@@ -587,7 +650,7 @@ def parse_insights_with_metadata(llm_output: str, date: str) -> Tuple[str, Dict]
     insights_md = body if meta else llm_output
 
     metadata = {
-        "title": meta.get("title") or f"📰 AI Daily 每日精选 | {date}",
+        "title": meta.get("title") or f"📰 News Agent 每日精选 | {date}",
         "excerpt": meta.get("excerpt", ""),
         "seotitle": meta.get("seotitle", ""),
         "seodescription": meta.get("seodescription", ""),
@@ -603,13 +666,13 @@ def parse_digest_with_metadata(llm_output: str, date: str) -> Tuple[str, Dict]:
     """解析 digest LLM 输出,返回 (digest_md, metadata)。
 
     metadata 字段:title / lead / highlights / profile / date。
-    无 frontmatter 时回退到 "🌙 AI Daily 晚报 | {date}" 标题。
+    无 frontmatter 时回退到 "🌙 News Agent 晚报 | {date}" 标题。
     """
     meta, body = parse_frontmatter(llm_output)
     digest_md = body if meta else llm_output
 
     metadata = {
-        "title": meta.get("title") or f"🌙 AI Daily 晚报 | {date}",
+        "title": meta.get("title") or f"🌙 News Agent 晚报 | {date}",
         "lead": meta.get("lead", ""),
         "highlights": normalize_str_list(meta.get("highlights")),
         "profile": "default",

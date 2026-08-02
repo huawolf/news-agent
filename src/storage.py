@@ -185,13 +185,28 @@ def load_recent_push_content(
 
 
 def get_last_push_file(data_dir: str = "news-data") -> Optional[str]:
-    """从news-data目录找到最新的push文件"""
+    """从news-data目录找到最新的有效push文件。
+
+    空推送文件（sourceCount=0 且 totalEntries=0）不应推进下一次 RSS
+    推送的时间边界。否则一次上游评分失败后的空早报，会把随后补评分
+    成功的新闻全部划入 context，导致“过滤后有条目，但 RSS 无新消息”。
+    """
     data_path = Path(data_dir)
     if not data_path.exists():
         return None
 
-    push_files = sorted(data_path.glob("push-*.md"))
-    return str(push_files[-1]) if push_files else None
+    push_files = sorted(data_path.glob("push-*.md"), reverse=True)
+    for push_file in push_files:
+        try:
+            meta, _ = parse_frontmatter(push_file.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        source_count = int(meta.get("sourceCount") or 0)
+        total_entries = int(meta.get("totalEntries") or 0)
+        if source_count == 0 and total_entries == 0:
+            continue
+        return str(push_file)
+    return None
 
 
 def extract_push_time(filepath: str) -> Optional[datetime]:
@@ -386,7 +401,7 @@ def save_push_file(
         f.write(full_content)
 
 
-def load_existing_links(filepath: str, threshold: int = 150) -> set:
+def load_existing_links(filepath: str, threshold: int = 150, data_dir: str = "news-data") -> set:
     """加载文件中已有的链接（用于去重）
 
     如果当天时间已超过 threshold 分钟，则只需加载当天文件；
@@ -415,7 +430,7 @@ def load_existing_links(filepath: str, threshold: int = 150) -> set:
         )
 
     yesterday = (now - timedelta(days=1)).date()
-    yesterday_file = get_fetch_file(yesterday)
+    yesterday_file = get_fetch_file(yesterday, data_dir)
     if Path(yesterday_file).exists():
         all_links.update(
             {e.get("link") for e in read_entries(yesterday_file) if e.get("link")}
@@ -609,4 +624,3 @@ def mark_links_as_sent(links: List[str], data_dir: str = "news-data"):
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ 保存 sent-history.json 失败: {e}")
-

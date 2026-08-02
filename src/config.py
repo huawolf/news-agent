@@ -47,9 +47,7 @@ def load_config(config_path: str = "config.json") -> Dict:
     with open(path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    # 注入个人兴趣偏好环境变量
-    import os
-    config["personal_preferences"] = os.environ.get("PERSONAL_PREFERENCES", "").strip()
+    config["personal_preferences"] = str(config.get("personal_preferences", "")).strip()
 
     return config
 

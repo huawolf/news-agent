@@ -47,7 +47,8 @@ class CustomPlatform(PushPlatform):
             "Content-Type": "application/json"
         }
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        timeout = aiohttp.ClientTimeout(total=int(self.config.get("request_timeout", 30)))
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()

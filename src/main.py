@@ -1,10 +1,11 @@
-"""AI每日资讯推送系统 - 主程序"""
+"""News Agent 主程序。"""
 
 import argparse
 import asyncio
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 # 加载 .env 文件
@@ -24,7 +25,7 @@ from src.llm import (
     parse_immediate_push_with_metadata,
     score_batch,
 )
-from src.processor import html_to_markdown, is_daily_newsletter_entry
+from src.processor import html_to_markdown, is_own_digest_entry
 from src.push import send_to_platforms
 from src.sections.github.section import run_github_section
 from src.sections.hackernews.section import run_hackernews_section
@@ -216,6 +217,8 @@ def collect_entries_for_push(
     context_days: int = 2,
     min_score: int = 60,
     data_dir: str = "news-data",
+    preferences: Optional[Dict] = None,
+    max_items: Optional[int] = None,
 ) -> tuple[List[Dict], List[Dict]]:
     """
     收集推送所需的条目，返回 (待推送条目, 上下文条目)
@@ -281,7 +284,66 @@ def collect_entries_for_push(
     # 上下文按分数排序，取前50
     context = sorted(context, key=lambda x: x.get("score", 0), reverse=True)[:50]
 
+    to_push = rank_entries_for_delivery(to_push, preferences or {})
+    if max_items is not None:
+        to_push = to_push[:max(1, max_items)]
     return to_push, context
+
+
+def rank_entries_for_delivery(entries: List[Dict], preferences: Dict) -> List[Dict]:
+    """Apply deterministic personal ranking and diversity after LLM base scoring."""
+    interests = [str(value).lower() for value in preferences.get("interests", [])]
+    avoid = [str(value).lower() for value in preferences.get("avoid", [])]
+    source_weights = preferences.get("source_weights", {})
+    diversity = preferences.get("diversity", {})
+    max_per_source = int(diversity.get("max_per_source", 0) or 0)
+    max_per_topic = int(diversity.get("max_per_topic", 0) or 0)
+
+    def scored(entry: Dict) -> tuple[int, Dict]:
+        text = " ".join([
+            str(entry.get("title", "")), str(entry.get("summary", "")),
+            " ".join(str(tag) for tag in entry.get("tags", [])),
+        ]).lower()
+        score = int(entry.get("score") or 0) + int(source_weights.get(entry.get("source", ""), 0) or 0)
+        score += 8 * sum(1 for term in interests if term and term in text)
+        score -= 20 * sum(1 for term in avoid if term and term in text)
+        item = dict(entry)
+        item["delivery_score"] = score
+        return score, item
+
+    ranked = [scored(entry) for entry in entries]
+    ranked.sort(key=lambda pair: (pair[0], str(pair[1].get("fetched_at", ""))), reverse=True)
+    result, sources, topics = [], {}, {}
+    for _, entry in ranked:
+        source = entry.get("source", "")
+        tags = entry.get("tags", []) or ["untagged"]
+        topic = str(tags[0])
+        if max_per_source and sources.get(source, 0) >= max_per_source:
+            continue
+        if max_per_topic and topics.get(topic, 0) >= max_per_topic:
+            continue
+        sources[source] = sources.get(source, 0) + 1
+        topics[topic] = topics.get(topic, 0) + 1
+        result.append(entry)
+    return result
+
+
+def active_delivery_schedule(config: Dict, now: Optional[datetime] = None) -> Dict:
+    """Return the closest configured delivery policy; supports legacy config as fallback."""
+    schedules = config.get("delivery", {}).get("schedules", [])
+    if not schedules:
+        return {}
+    current = now or now_local(config)
+    candidates = []
+    for schedule in schedules:
+        try:
+            previous = croniter(schedule["cron"], current).get_prev(datetime)
+            following = croniter(schedule["cron"], current).get_next(datetime)
+            distance = min(abs(current - previous), abs(following - current))
+            candidates.append((distance, schedule))
+        except (KeyError, ValueError):
+            continue
+    return min(candidates, key=lambda item: item[0])[1] if candidates else {}
 
 
 async def run_fetch_job(config: Dict):
@@ -334,13 +396,14 @@ async def run_fetch_job(config: Dict):
                 entry.get("content", ""), entry.get("link", "")
             )
 
-    fetch_file = get_fetch_file()
-    existing_links = load_existing_links(fetch_file, threshold)
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    fetch_file = get_fetch_file(data_dir=data_dir)
+    existing_links = load_existing_links(fetch_file, threshold, data_dir=data_dir)
     
     new_entries = []
     for e in all_entries:
         if e.get("link") and e["link"] not in existing_links:
-            if is_daily_newsletter_entry(e):
+            if is_own_digest_entry(e):
                 print(f"🚫 过滤日报/聚合新闻条目: 【{e.get('title')}】")
             else:
                 new_entries.append(e)
@@ -368,7 +431,7 @@ async def run_fetch_job(config: Dict):
 
     is_new_file = not os.path.exists(fetch_file)
     if is_new_file:
-        cleanup_old_files(days=config["filter"]["keep_days"])
+        cleanup_old_files(days=config["filter"]["keep_days"], data_dir=data_dir)
 
     # 添加 fetched_at 时间戳
     for entry in scored:
@@ -386,16 +449,27 @@ async def run_fetch_job(config: Dict):
 
     print(f"💾 已保存到 {fetch_file}")
 
-    hot_threshold = config["filter"]["hot_threshold"]
+    immediate_config = config.get("delivery", {}).get("immediate", {})
+    immediate_enabled = immediate_config.get("enabled", True)
+    hot_threshold = int(immediate_config.get("threshold", config["filter"]["hot_threshold"]))
     no_content_marker = config["filter"].get("no_content_marker", "[NO_NEW_CONTENT]")
-    hot_entries = [e for e in scored if (e.get("score") or 0) >= hot_threshold]
+    hot_entries = [e for e in scored if (e.get("score") or 0) >= hot_threshold] if immediate_enabled else []
+    daily_limit = int(immediate_config.get("daily_limit", 0) or 0)
+    if hot_entries and daily_limit:
+        notify_file = get_notify_file(data_dir=data_dir)
+        existing_notifications = 0
+        if os.path.exists(notify_file):
+            existing_notifications = Path(notify_file).read_text(encoding="utf-8", errors="ignore").count("------")
+        if existing_notifications >= daily_limit:
+            print(f"ℹ️ 已达到每日热点推送上限 ({daily_limit})，跳过即时推送")
+            hot_entries = []
     if hot_entries:
         print(f"🔥 发现 {len(hot_entries)} 条热点消息，即时推送...")
 
         # 加载近期已推送内容（仅供 LLM 查重，避免风格趋同）
         context_days = config["filter"]["context_days"]
-        recent_notify = load_recent_notify_content(context_days)
-        recent_push = load_recent_push_content(context_days)
+        recent_notify = load_recent_notify_content(context_days, data_dir=data_dir)
+        recent_push = load_recent_push_content(context_days, data_dir=data_dir)
         recent_context = (
             f"=== 近期即时推送 ===\n{recent_notify}\n\n"
             f"=== 近期汇总推送 ===\n{recent_push}"
@@ -426,18 +500,18 @@ async def run_fetch_job(config: Dict):
             now = now_local(config)
             timestamp = now.strftime("%Y-%m-%d %H:%M")
             content_without_title, metadata = parse_immediate_push_with_metadata(
-                push_content, f"🚨 AI Daily 快讯 | {timestamp}"
+                push_content, f"🚨 News Agent 快讯 | {timestamp}"
             )
             metadata["pushTime"] = now.isoformat()
 
             await send_to_platforms(
                 content_without_title,
                 config["push"],
-                "🚨 AI Daily 快讯 | " + metadata["title"],
+                "🚨 News Agent 快讯 | " + metadata["title"],
                 metadata=metadata,
             )
             # 保存即时推送内容到notify文件
-            notify_file = get_notify_file()
+            notify_file = get_notify_file(data_dir=data_dir)
             save_notify_file(notify_file, content_without_title, metadata)
             print(f"💾 已保存即时推送到 {notify_file}")
 
@@ -454,7 +528,11 @@ async def run_push_job(config: Dict):
     print(f"📤 Push Job | {now_local().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 50}")
 
-    if is_morning_push(now_local(config), config):
+    policy = active_delivery_schedule(config, now_local(config))
+    use_extended_sections = bool(policy.get("sections")) and any(
+        section != "rss" for section in policy["sections"]
+    )
+    if use_extended_sections or (not policy and is_morning_push(now_local(config), config)):
         await _run_morning_push(config)
     else:
         await _run_default_push(config)
@@ -463,7 +541,8 @@ async def run_push_job(config: Dict):
 async def _run_default_push(config: Dict):
     """晚报或非早报时段:沿用原有纯 RSS digest 流程,委托给 run_rss_section"""
     now = now_local(config)
-    rss_md, metadata, rss_err = await run_rss_section(config, now)
+    policy = active_delivery_schedule(config, now)
+    rss_md, metadata, rss_err = await run_rss_section(config, now, max_items=policy.get("max_items"))
 
     if rss_err and not rss_md:
         print(f"⚠️ [compose_digest] {rss_err}")
@@ -478,7 +557,7 @@ async def _run_default_push(config: Dict):
     if not metadata:
         date_str = now.strftime("%Y-%m-%d")
         metadata = {
-            "title": f"🌙 AI Daily 晚报 | {date_str}",
+            "title": f"🌙 News Agent 晚报 | {date_str}",
             "lead": "",
             "highlights": [],
             "profile": "default",
@@ -489,13 +568,14 @@ async def _run_default_push(config: Dict):
     await send_to_platforms(
         rss_md,
         config["push"],
-        title="📰 AI Daily 每日精选 | " + metadata["title"],
+        title="📰 News Agent 每日精选 | " + metadata["title"],
         metadata=metadata,
     )
-    last_push_file = get_last_push_file()
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    last_push_file = get_last_push_file(data_dir)
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
-    push_file = get_push_file()
+    push_file = get_push_file(data_dir=data_dir)
     rss_count = rss_md.count("###")
     save_push_file(
         push_file,
@@ -517,6 +597,8 @@ async def _run_default_push(config: Dict):
             context_days=context_days,
             min_score=min_score,
             data_dir=data_dir,
+            preferences=config.get("preferences"),
+            max_items=policy.get("max_items"),
         )
         sent_links = [e.get("link") for e in to_push if e.get("link")]
         mark_links_as_sent(sent_links, data_dir=data_dir)
@@ -537,8 +619,9 @@ async def _run_morning_push(config: Dict):
     """
     now = now_local(config)
 
+    policy = active_delivery_schedule(config, now)
     rss_result, gh_result, hn_result = await asyncio.gather(
-        run_rss_section(config, now),
+        run_rss_section(config, now, max_items=policy.get("max_items")),
         run_github_section(config, now),
         run_hackernews_section(config, now),
     )
@@ -574,7 +657,7 @@ async def _run_morning_push(config: Dict):
         fallback = digest_meta or {}
         digest_title = fallback.get("title", "")
 
-        title = digest_title if digest_title else f"📰 AI Daily 每日精选 | {date_str}"
+        title = digest_title if digest_title else f"📰 News Agent 每日精选 | {date_str}"
         metadata = {
             "date": date_str,
             "pushTime": now.isoformat(),
@@ -605,13 +688,14 @@ async def _run_morning_push(config: Dict):
     await send_to_platforms(
         final,
         config["push"],
-        title="📰 AI Daily 每日精选 | " + metadata["title"],
+        title="📰 News Agent 每日精选 | " + metadata["title"],
         metadata=metadata,
     )
-    last_push_file = get_last_push_file()
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    last_push_file = get_last_push_file(data_dir)
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
-    push_file = get_push_file()
+    push_file = get_push_file(data_dir=data_dir)
     rss_count = rss_md.count("###") if rss_md else 0
     save_push_file(
         push_file, final, rss_count, rss_count, profile="morning", metadata=metadata
@@ -628,6 +712,8 @@ async def _run_morning_push(config: Dict):
             context_days=context_days,
             min_score=min_score,
             data_dir=data_dir,
+            preferences=config.get("preferences"),
+            max_items=policy.get("max_items"),
         )
         sent_links = [e.get("link") for e in to_push if e.get("link")]
         mark_links_as_sent(sent_links, data_dir=data_dir)
@@ -741,7 +827,7 @@ async def cmd_check(config: Dict) -> int:
 
 
 async def cmd_fetch(config: Dict) -> int:
-    """单次抓取（systemd timer 调用）"""
+    """单次抓取任务。"""
     try:
         await run_fetch_job(config)
         return 0
@@ -751,7 +837,7 @@ async def cmd_fetch(config: Dict) -> int:
 
 
 async def cmd_push(config: Dict) -> int:
-    """单次推送（systemd timer 调用）"""
+    """单次推送任务。"""
     try:
         await run_push_job(config)
         return 0
@@ -843,8 +929,8 @@ async def cmd_hackernews(config: Dict) -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="daily-news",
-        description="AI 每日资讯推送系统",
+        prog="news-agent",
+        description="News Agent 本地资讯推送服务",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check", help="校验 LLM 接口可达性")
@@ -854,12 +940,31 @@ def _parse_args() -> argparse.Namespace:
     sub.add_parser("rss", help="单独跑一次 RSS Digest 板块（仅打印,不推送）")
     sub.add_parser("github", help="单独跑一次 GitHub Trending 板块（仅打印,不推送）")
     sub.add_parser("hackernews", help="单独跑一次 Hacker News 板块（仅打印,不推送）")
+    serve = sub.add_parser("serve", help="启动本地 Web/API 服务和调度器")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", default=12301, type=int)
+    sub.add_parser("mcp", help="启动 stdio MCP 服务")
+    service = sub.add_parser("service", help="管理登录后启动的本地服务")
+    service.add_argument("action", choices=["install", "uninstall", "start", "stop", "status"])
     return parser.parse_args()
 
 
 def main() -> int:
-    print("🚀 AI每日资讯推送系统")
+    print("News Agent 本地资讯推送服务")
     args = _parse_args()
+
+    if args.command == "serve":
+        from src.server import run_server
+        run_server(args.host, args.port)
+        return 0
+    if args.command == "mcp":
+        from src.mcp_server import run_mcp
+        run_mcp()
+        return 0
+    if args.command == "service":
+        from src import lifecycle
+        print(getattr(lifecycle, args.action)())
+        return 0
 
     try:
         config = load_config()
