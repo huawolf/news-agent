@@ -25,6 +25,8 @@ build/
 .coverage
 htmlcov/
 tests/
+runs/
+logs/
 
 # IDE
 .idea/
@@ -43,3 +45,5 @@ news-data/
 
 # Git worktrees
 .worktrees/
+AGENTS.md
+knowledge/
