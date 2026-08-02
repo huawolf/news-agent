@@ -1,2 +1,0 @@
-[console_scripts]
-news-agent = src.main:main

@@ -1,9 +1,0 @@
-{
-  "id": "a545ce5ff7e44570b2b8e62383d97516",
-  "kind": "run",
-  "source": "web_api",
-  "status": "failed",
-  "started_at": "2026-08-02T08:12:38.979518+00:00",
-  "error": "Interrupted by service restart during project-local data directory migration.",
-  "finished_at": "2026-08-02T08:23:31+00:00"
-}
