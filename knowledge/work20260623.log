@@ -1,0 +1,8 @@
+时间: 2026-06-23
+任务: 在打分 prompt 中新增一条判定规则：有创意的 AI 应用或基础设施并获得稳定收入的创业成功案例可破例获得 90+ 评分。
+涉及文件:
+- prompts/score_batch.md: 在核心约束中增加第 4 条特例说明，并在 90-100 分档位中增加 AI 创业成功案例说明与相应例子。
+- config.json: 修改 `github_trending` 版块的配置，将 `max_deep_dive` 从 10 改为 20，`max_items` 从 3 改为 5。
+- tests/pytest/test_main.py: 修复测试中的 sys.argv 传参错误以及对同步函数使用 await 的 TypeError 问题，并实现了在独立线程中执行 asyncio.run 的 mock。
+- prompts/section_github.md: 在选择规则中，新增倾向于优先筛选“解决某种实际具体问题，或使用 AI 工具实现了某种高效自动化”的开源项目的倾向规则。
+- prompts/insights.md: 优化 `lead` 字段（新闻摘要）的要求，引导模型聚焦于“核心内容提炼（谁做了什么）”和“商业与行业价值（对AI创业、相关股票、未来趋势的影响）”，减少冗余啰嗦表述，并更新了输出示例。

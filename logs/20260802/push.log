@@ -1,0 +1,49 @@
+2026-08-02 16:43:20 INFO  news_agent.push job=059279ea37ef41d6aa4bef641618924e push stage started
+2026-08-02 16:45:42 INFO  news_agent.push job=059279ea37ef41d6aa4bef641618924e push stage completed
+
+=== job d6eec6b344914489aab4375d68e3aae0 kind=push source=web_api started 2026-08-02T08:50:48.942656+00:00 ===
+
+==================================================
+📤 Push Job | 2026-08-02 16:50:48
+==================================================
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 23 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-02 16:45:42
+ℹ️ RSS: 无新消息
+📥 GH: 抓取 trending 页...
+📋 GH: 解析 15 个 repo
+🔍 GH: history 过滤掉 15 条已见,新候选 0 条
+ℹ️ GH: 无新候选,跳过
+✅ 已推送到 feishu
+💾 已保存早报到 news-data/push-2026-08-02-16-50-58.md
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 23 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-02 16:45:42
+💾 已把 0 条早报链接记录到已发送历史
+=== job d6eec6b344914489aab4375d68e3aae0 completed 2026-08-02T08:50:58.107790+00:00 ===
+2026-08-02 16:50:58 INFO  news_agent.push job=d6eec6b344914489aab4375d68e3aae0 kind=push source=web_api completed
+
+=== job 86bc958056474e53baeba2d9819ab432 kind=push source=web_api started 2026-08-02T08:57:58.521457+00:00 ===
+
+==================================================
+📤 Push Job | 2026-08-02 16:57:58
+==================================================
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 23 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-01 16:57:58
+📥 GH: 抓取 trending 页...
+📋 GH: 解析 15 个 repo
+🔍 GH: history 过滤掉 15 条已见,新候选 0 条
+ℹ️ GH: 无新候选,跳过
+✅ 已推送到 feishu
+💾 已保存早报到 news-data/push-2026-08-02-17-00-26.md
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 23 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-01 17:00:26
+💾 已把 7 条早报链接记录到已发送历史
+=== job 86bc958056474e53baeba2d9819ab432 completed 2026-08-02T09:00:26.391004+00:00 ===
+2026-08-02 17:00:26 INFO  news_agent.push job=86bc958056474e53baeba2d9819ab432 kind=push source=web_api completed

@@ -1,0 +1,22 @@
+{
+  "id": "6408d53835754287a0485fc8f152c441",
+  "kind": "preview",
+  "source": "web_api",
+  "status": "succeeded",
+  "started_at": "2026-08-02T08:34:14.107103+00:00",
+  "preview": {
+    "content": "### 1. 美团LongCat开源VitaBench 2.0：首个长期动态用户建模智能体基准\nLongCat团队发布VitaBench 2.0，集合56名拟真用户、819个复杂任务、超2000个动态偏好与66个可执行工具，平均每位用户轨迹跨度达1580天，专门评测模型在长期互动中的个性化与主动性。结果显示，最强模型Claude-Opus-4.6平均分刚过0.5，所有模型在主动提问任务上断崖式下跌，多数模型即便获知真实偏好仍难以正确应用。[查看原文](https://tech.meituan.com/2026/06/29/LongCat-VitaBench-2.0.html) [查看原文](https://github.com/meituan-longcat/vitabench-2.0)\n\n### 2. 美团LongCat开源LoHoSearch：知识图谱自动出题打造高难度搜索基准\nLoHoSearch以覆盖762万实体的维基知识图谱为基础自动生成高难度搜索题目，收录544道人工核验题。已测最强模型GPT-5.5准确率仅34.74%，而DeepSeek-V4-Flash平均工具调用次数较BrowseComp的35次增至61次，现有上下文管理策略仅带来6.8%提升，低于BrowseComp上的14.03%。[查看原文](https://tech.meituan.com/2026/07/24/LongCat-LoHoSearch.html) [查看原文](https://huggingface.co/datasets/meituan-longcat/LoHoSearch)\n\n### 3. Wafer.ai：AMD MI355X运行Kimi K3，每美元性能超过B300\nWafer.ai发布评测称，Kimi K3模型在AMD MI355X上的每美元性能优于NVIDIA B300，引发对AMD AI芯片推理性价比的新一轮讨论，该帖在Hacker News获112分与21条评论。[查看原文](https://www.wafer.ai/blog/kimi-k3-mi355x)\n\n### 4. MIT研究：AI理财建议质量超出预期，提问方式决定效果\nMIT斯隆商学院研究显示，AI理财建议在多数情况下表现良好，尤其是当用户提出正确的问题时，相关话题在Hacker News获290分与258条评论。[查看原文](https://mitsloan.mit.edu/ideas-made-to-matter/ai-financial-advice-surprisingly-good-especially-if-you-ask-right-questions)\n\n### 5. xAI联合创始人Igor Babuschkin披露River AI三个押注\nIgor Babuschkin在播客中首次详谈离开xAI后的新公司River AI，押注企业API强化学习服务、以个体幸福感为奖励函数的个人AI、以及本地推理硬件。他还判断闭源模型厂商正被监管与开源模型两头挤压，美国需要拥有全球最好的开源模型。[查看原文](https://www.xiaoyuzhoufm.com/episode/6a6ed539ab3a91c24a0e6790)\n\n### 6. Grok支持视频分析：上传视频即可提问\nElon Musk发文表示Grok现已可分析任何视频，并转发确认用户可像上传图片一样直接上传视频向Grok提问，演示中Grok成功分析了Kobe Bryant广告片段。[查看原文](https://nitter.privacyredirect.com/elonmusk/status/2083800942927839307#m) [查看原文](https://nitter.privacyredirect.com/elonmusk/status/2083800687561908662#m)",
+    "metadata": {
+      "title": "美团开源两大智能体基准,MI355X跑Kimi K3胜B300",
+      "lead": "美团LongCat开源VitaBench 2.0与LoHoSearch两大评测基准,前者含2000+动态偏好,后者GPT-5.5准确率仅34.74%;Wafer.ai称AMD MI355X运行Kimi K3每美元性能超B300;xAI联合创始人Igor披露River AI三个押注。",
+      "highlights": [
+        "美团开源VitaBench 2.0,覆盖56名用户2000+偏好",
+        "LoHoSearch上线,GPT-5.5准确率仅34.74%",
+        "MI355X运行Kimi K3,每美元性能超B300"
+      ],
+      "profile": "default",
+      "date": "2026-08-02"
+    }
+  },
+  "finished_at": "2026-08-02T08:36:10.664425+00:00"
+}

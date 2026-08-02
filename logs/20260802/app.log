@@ -1,0 +1,69 @@
+2026-08-02 16:39:19 INFO  news_agent.app job=059279ea37ef41d6aa4bef641618924e kind=run source=web_api started log=/Users/chenhl/Project/news-agent/logs/20260802/app.log
+
+=== job 059279ea37ef41d6aa4bef641618924e kind=run source=web_api started 2026-08-02T08:39:19.153846+00:00 ===
+=== fetch stage started job=059279ea37ef41d6aa4bef641618924e ===
+
+==================================================
+🔄 Fetch Job | 2026-08-02 16:39:19
+==================================================
+📂 共 373 个订阅源
+⚠️ HTTP 500: https://wechat2rss.bestblogs.dev/feed/7515eedf3f994a6b23ebda2313a4b6bc7532f536.xml
+⚠️ HTTP 500: https://wechat2rss.bestblogs.dev/feed/8b68fdb4f24ab2287100988a8cec36363fec4214.xml
+⚠️ HTTP 500: https://wechat2rss.bestblogs.dev/feed/13492cb50df57702cdc0dfa71467cd03f9dd69be.xml
+⚠️ HTTP 500: https://wechat2rss.bestblogs.dev/feed/c125f09ef36fd6b6cb092c409e69a5bcc867d378.xml
+⚠️ 获取失败 屠龙之术: Cannot connect to host rsshub.bestblogs.dev:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Replicate(@replicate): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Replit ⠕(@Replit): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Rowan Cheung(@rowancheung): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Luyu Zhang(@goocarlos): TimeoutError
+⚠️ 获取失败 Runway(@runwayml): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Sahil Lavingia(@shl): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Ryo Lu(@ryolu_): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Satya Nadella(@satyanadella): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Sam Altman(@sama): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 Scott Wu(@ScottWu46): Cannot connect to host api.xgo.ing:443 ssl:default [Connection reset by peer]
+⚠️ 获取失败 马东锡 NLP(@dongxi_nlp): TimeoutError
+📥 抓取到 19 条 RSS 原始消息
+📥 HN: 抓取首页...
+📋 HN: 并发获取 30 条 story 的 Algolia 详细内容与热门评论...
+📥 HN: 抓取到 30 条热门评论富化消息
+📥 汇总抓取到 49 条原始消息
+🆕 新消息 49 条 | 链接数：0
+🤖 LLM评分中...
+📦 分成 1 个批次评分 (共 49 条)
+⚠️ 批次1 评分失败: 
+⚠️ [score_batch] 1 个错误: 批次1 评分失败: 
+✅ 已推送到 feishu
+🔍 关键词比对：载入过去 3 天历史新闻 0 条
+💾 已保存到 news-data/fetch-2026-08-02.json
+✅ Fetch Job 完成 | 新消息: 49 条 | 热点: 0 条
+=== push stage started job=059279ea37ef41d6aa4bef641618924e ===
+
+==================================================
+📤 Push Job | 2026-08-02 16:43:20
+==================================================
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 0 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-01 16:43:20
+ℹ️ RSS: 无新消息
+📥 GH: 抓取 trending 页...
+📋 GH: 解析 15 个 repo
+🔍 GH: history 过滤掉 0 条已见,新候选 15 条
+🌐 GH: 并发 enrich 15 个 repo (REST API)...
+⚠️ GH: 未配置 GITHUB_TOKEN,匿名调用 (60 req/hr)
+✅ GH: enrich 成功 15 / 失败 0 / 输入 15
+🤖 GH: summarize 15 个候选...
+✅ GH: 板块输出 2050 chars
+✅ 已推送到 feishu
+💾 已保存早报到 news-data/push-2026-08-02-16-45-42.md
+📋 收集总条目: 49 条 , context_days: 2, min_score:60
+📋 过滤后条目: 0 条 
+📋 已发送历史库: 0 条已过滤链接
+推送时间边界: 2026-08-01 16:45:42
+💾 已把 0 条早报链接记录到已发送历史
+=== job 059279ea37ef41d6aa4bef641618924e completed 2026-08-02T08:45:42.145210+00:00 ===
+2026-08-02 16:45:42 INFO  news_agent.app job=059279ea37ef41d6aa4bef641618924e kind=run source=web_api completed
+2026-08-02 16:48:17 INFO  news_agent.app scheduler reloaded after external config update
+2026-08-02 16:50:48 INFO  news_agent.app job=d6eec6b344914489aab4375d68e3aae0 kind=push source=web_api started log=/Users/chenhl/Project/news-agent/logs/20260802/push.log
+2026-08-02 16:57:58 INFO  news_agent.app job=86bc958056474e53baeba2d9819ab432 kind=push source=web_api started log=/Users/chenhl/Project/news-agent/logs/20260802/push.log
