@@ -1,4 +1,4 @@
-"""News Agent 主程序。"""
+"""News Agent main program."""
 
 import argparse
 import asyncio
@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# 加载 .env 文件
+# Load .env file.
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,6 +31,7 @@ from src.sections.github.section import run_github_section
 from src.sections.hackernews.section import run_hackernews_section
 from src.sections.insights.section import run_insights_section
 from src.sections.rss.section import run_rss_section
+from src.sections.signals.collector import fetch_signal_entries
 from src.storage import (
     append_entries,
     assemble_with_sentinels,
@@ -52,12 +53,12 @@ from src.storage import (
 
 
 async def notify_llm_errors(stage: str, errors: List[str], config: Dict):
-    """发送简单的 LLM 异常通知"""
+    """Send a simple LLM error notification."""
     if not errors:
         return
 
     lines = [
-        "## LLM异常",
+        "## LLM Error",
         "",
         f"stage: {stage}",
         f"time: {now_local(config).strftime('%Y-%m-%d %H:%M:%S')}",
@@ -68,11 +69,11 @@ async def notify_llm_errors(stage: str, errors: List[str], config: Dict):
     try:
         await send_to_platforms("\n".join(lines), config["push"])
     except Exception as e:
-        print(f"⚠️ LLM异常通知发送失败: {e}")
+        print(f"⚠️ Failed to send LLM error notification: {e}")
 
 
 def now_local(config: Dict = None) -> datetime:
-    """获取配置时区的当前时间"""
+    """Return the current time in the configured timezone."""
     return datetime.now(get_timezone(config))
 
 
@@ -100,8 +101,20 @@ def _default_morning_title(config: Dict, date_str: str) -> str:
     )
 
 
+def _default_immediate_title(config: Dict, timestamp: str) -> str:
+    return (
+        f"🚨 News Agent Breaking News | {timestamp}"
+        if _is_english_output(config)
+        else f"🚨 News Agent 快讯 | {timestamp}"
+    )
+
+
+def _immediate_title_prefix(config: Dict) -> str:
+    return "🚨 News Agent Breaking News | " if _is_english_output(config) else "🚨 News Agent 快讯 | "
+
+
 def parse_time_to_local(time_str: str, config: Dict = None) -> Optional[datetime]:
-    """解析时间字符串为配置时区的datetime"""
+    """Parse a timestamp string into the configured local timezone."""
     try:
         dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
         return dt.astimezone(get_timezone(config))
@@ -129,7 +142,7 @@ def calculate_push_times(
 
 
 def is_keyword_match(k1: str, k2: str) -> bool:
-    """判定两个关键词是否相似/匹配"""
+    """Return whether two keywords are similar enough to match."""
     k1_clean = "".join(c for c in k1.lower() if c.isalnum())
     k2_clean = "".join(c for c in k2.lower() if c.isalnum())
     
@@ -147,7 +160,7 @@ def is_keyword_match(k1: str, k2: str) -> bool:
 
 
 def count_overlapping_keywords(keywords_a: List[str], keywords_b: List[str]) -> int:
-    """计算两组关键词中重合的数量"""
+    """Count overlapping keywords between two keyword lists."""
     matches = 0
     matched_in_b = set()
     
@@ -162,7 +175,7 @@ def count_overlapping_keywords(keywords_a: List[str], keywords_b: List[str]) -> 
 
 
 def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
-    """基于关键词相似度去重，与过去 3 天已抓取的新闻进行比对"""
+    """Deduplicate by keyword similarity against news fetched in the last 3 days."""
     tz = get_timezone(config)
     now = datetime.now(tz)
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
@@ -173,11 +186,11 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
         fetch_file = get_fetch_file(d, data_dir)
         if os.path.exists(fetch_file):
             for entry in read_entries(fetch_file):
-                # 排除被置为 0 分的重复项
+                # Exclude duplicate entries already set to score 0.
                 if entry.get("keywords") and entry.get("score", 0) > 0:
                     history_entries.append(entry)
                     
-    print(f"🔍 关键词比对：载入过去 3 天历史新闻 {len(history_entries)} 条")
+    print(f"🔍 Keyword deduplication: loaded {len(history_entries)} historical entries from the last 3 days")
     
     if not history_entries:
         return
@@ -206,23 +219,23 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
         if is_dup:
             new_entry["score"] = 0
             new_entry["is_duplicate"] = True
-            new_entry["duplicate_reason"] = f"与历史新闻《{matching_history_title}》({matching_history_link}) 关键词重合度 >= 5"
+            new_entry["duplicate_reason"] = f"Keyword overlap >= 5 with historical news '{matching_history_title}' ({matching_history_link})"
             duplicate_count += 1
-            print(f"🚫 关键词去重命中：【{new_entry.get('title')}】与已发新闻【{matching_history_title}】重合")
+            print(f"🚫 Keyword duplicate detected: '{new_entry.get('title')}' overlaps with sent news '{matching_history_title}'")
             
     if duplicate_count > 0:
-        print(f"🚫 关键词去重拦截了 {duplicate_count} 条消息 (score 被置 0)")
+        print(f"🚫 Keyword deduplication blocked {duplicate_count} entries by setting score to 0")
 
 
 def is_morning_push(now: datetime, config: Dict) -> bool:
-    """判定当前 push 是否为「早报」(触发 GH/HN/insights 三段)。
+    """Return whether the current push is the morning brief.
 
-    规则:在 `schedule.push_cron` 列表里,now 离哪条 cron 最近,就归为那条;
-    最近的那条若是当天最早的 cron,则视为早报。
+    The closest cron in `schedule.push_cron` is treated as the active schedule.
+    If that cron is the earliest cron for the day, it is a morning brief.
 
-    特例:
-    - `push_cron` 为空 → 不视为早报
-    - `push_cron` 只有一条 → 该条即"最早"也即"最近",任何触发都视为早报
+    Special cases:
+    - Empty `push_cron` means no morning brief.
+    - A single `push_cron` is both earliest and closest, so it is a morning brief.
     """
     cron_list = config.get("schedule", {}).get("push_cron", [])
     if not cron_list:
@@ -245,21 +258,21 @@ def collect_entries_for_push(
     max_items: Optional[int] = None,
 ) -> tuple[List[Dict], List[Dict]]:
     """
-    收集推送所需的条目，返回 (待推送条目, 上下文条目)
+    Collect entries for delivery and return (entries_to_push, context_entries).
 
-    逻辑：
-    1. 获取 context_days 天内的所有条目
-    2. 按 min_score 过滤
-    3. 加载 sent-history.json 已推送历史
-    4. 过滤掉已推送的链接
+    Logic:
+    1. Load all entries from the last context_days days.
+    2. Filter by min_score.
+    3. Load sent-history.json.
+    4. Filter links that have already been sent.
     5. push_time = max(last_push_time, now - 24h)
-    6. 晚于 push_time 的 → 待推送条目
-    7. 早于 push_time 的 → 上下文条目（用于LLM去重参考）
+    6. Entries after push_time become delivery candidates.
+    7. Earlier entries become LLM deduplication context.
     """
     tz = get_timezone()
     now = datetime.now(tz)
 
-    # 获取 context_days 天的所有条目
+    # Load all entries from the last context_days days.
     all_entries = []
     today = now.date()
     for i in range(context_days):
@@ -269,29 +282,29 @@ def collect_entries_for_push(
             all_entries.append(entry)
 
     print(
-        f"📋 收集总条目: {len(all_entries)} 条 , context_days: {context_days}, min_score:{min_score}"
+        f"📋 Collected entries: {len(all_entries)}, context_days: {context_days}, min_score: {min_score}"
     )
 
-    # 按 min_score 过滤
+    # Filter by min_score.
     qualified_entries = [e for e in all_entries if (e.get("score") or 0) >= min_score]
-    print(f"📋 过滤后条目: {len(qualified_entries)} 条 ")
+    print(f"📋 Entries after score filtering: {len(qualified_entries)}")
 
-    # 加载已发送历史去重
+    # Load sent history for deduplication.
     sent_links = load_sent_links(days=3, data_dir=data_dir)
-    print(f"📋 已发送历史库: {len(sent_links)} 条已过滤链接")
+    print(f"📋 Sent history loaded: {len(sent_links)} filtered links")
 
-    # 计算推送时间边界：max(last_push_time, now - 24h)
+    # Calculate delivery cutoff: max(last_push_time, now - 24h).
     past_24h = now - timedelta(hours=24)
     push_cutoff = (
         last_push_time if last_push_time and last_push_time > past_24h else past_24h
     )
 
-    print(f"推送时间边界: {push_cutoff.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Delivery cutoff: {push_cutoff.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # 分割条目
+    # Split entries.
     to_push = []
     context = []
-    # context 只供 LLM 做去重/历史参考,不需要 content/link/fetched_at 等大字段
+    # Context is only for LLM deduplication/history reference; omit large fields.
     CONTEXT_FIELDS = ("title", "source", "score", "summary", "tags", "published")
 
     for entry in qualified_entries:
@@ -305,7 +318,7 @@ def collect_entries_for_push(
         else:
             context.append({k: entry.get(k) for k in CONTEXT_FIELDS})
 
-    # 上下文按分数排序，取前50
+    # Sort context by score and keep the top 50.
     context = sorted(context, key=lambda x: x.get("score", 0), reverse=True)[:50]
 
     to_push = rank_entries_for_delivery(to_push, preferences or {})
@@ -382,54 +395,62 @@ async def run_fetch_job(config: Dict):
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback)
 
     sources = merge_sources(config["sources"])
-    print(f"📂 共 {len(sources)} 个订阅源")
+    print(f"📂 Sources configured: {len(sources)}")
 
     if not sources:
-        print("⚠️ 没有可用的订阅源")
+        print("⚠️ No available sources")
         return
 
     max_workers = config.get("fetch", {}).get("max_workers", 20)
     timeout = config.get("fetch", {}).get("timeout", 30)
     
-    # 1. 抓取 RSS 订阅源
+    # 1. Fetch RSS sources.
     entries = await fetch_all_feeds(
         sources, cutoff, max_workers=max_workers, timeout=timeout
     )
-    print(f"📥 抓取到 {len(entries)} 条 RSS 原始消息")
+    print(f"📥 Fetched {len(entries)} raw RSS entries")
 
-    # 2. 并发抓取 Hacker News (不走 Jina Reader 抓取外链，直接读 Algolia 热门评论)
+    # 2. Fetch built-in signal sources.
+    signal_entries = []
+    try:
+        signal_entries = await fetch_signal_entries(config, cutoff_time=cutoff)
+        print(f"📥 Signals: fetched {len(signal_entries)} built-in signal entries")
+    except Exception as e:
+        print(f"⚠️ Signals fetch failed: {e}")
+
+    # 3. Fetch Hacker News concurrently using Algolia comment data.
     hn_entries = []
     try:
         from src.fetcher import fetch_hackernews_entries
         hn_entries = await fetch_hackernews_entries(config, cutoff_time=cutoff)
-        print(f"📥 HN: 抓取到 {len(hn_entries)} 条热门评论富化消息")
+        print(f"📥 HN: fetched {len(hn_entries)} enriched popular-comment entries")
     except Exception as e:
-        print(f"⚠️ HN 抓取失败: {e}")
+        print(f"⚠️ HN fetch failed: {e}")
 
-    # 合并新闻源
-    raw_all_entries = entries + hn_entries
+    # Merge sources.
+    raw_all_entries = entries + signal_entries + hn_entries
 
-    # 二次校验：丢弃任何发布时间早于 24 小时前 (cutoff) 的新闻
+    # Second validation: discard entries published before the configured cutoff.
     all_entries = []
     for e in raw_all_entries:
         pub = e.get("published")
         if pub and isinstance(pub, datetime):
-            # 统一转换成 utc 比较
+            # Normalize to UTC for comparison.
             if pub.tzinfo is None:
                 pub_utc = pub.replace(tzinfo=timezone.utc)
             else:
                 pub_utc = pub.astimezone(timezone.utc)
             if pub_utc < cutoff:
-                print(f"🕒 过滤非24小时内过远新闻: 【{e.get('title')}】({pub})")
+                print(f"🕒 Filtered stale entry outside the lookback window: '{e.get('title')}' ({pub})")
                 continue
         all_entries.append(e)
 
-    print(f"📥 汇总抓取到 {len(all_entries)} 条原始消息（已排除 >24h 旧闻）")
+    print(f"📥 Total raw entries after stale filtering: {len(all_entries)}")
 
     if not all_entries:
         return
 
-    # 对非 Hacker News 源的普通 RSS 条目进行 HTML 格式转换
+    # Convert HTML to Markdown for normal RSS entries outside Hacker News.
     for entry in all_entries:
         if entry.get("source") != "Hacker News":
             entry["content"] = html_to_markdown(
@@ -444,17 +465,17 @@ async def run_fetch_job(config: Dict):
     for e in all_entries:
         if e.get("link") and e["link"] not in existing_links:
             if is_own_digest_entry(e):
-                print(f"🚫 过滤日报/聚合新闻条目: 【{e.get('title')}】")
+                print(f"🚫 Filtered digest/aggregator entry: '{e.get('title')}'")
             else:
                 new_entries.append(e)
                 
-    print(f"🆕 新消息 {len(new_entries)} 条 | 链接数：{len(existing_links)}")
+    print(f"🆕 New entries: {len(new_entries)} | existing links: {len(existing_links)}")
 
     if not new_entries:
         return
 
-    print("🤖 LLM评分中...")
-    # 预处理：将所有 datetime 转换为字符串，避免 JSON 序列化错误
+    print("🤖 Scoring with LLM...")
+    # Convert datetime values to strings before JSON serialization.
     for entry in new_entries:
         if isinstance(entry.get("published"), datetime):
             entry["published"] = (
@@ -463,17 +484,17 @@ async def run_fetch_job(config: Dict):
 
     scored, score_errors = await score_batch(new_entries, config["llm"])
     if score_errors:
-        print(f"⚠️ [score_batch] {len(score_errors)} 个错误: {score_errors[0]}")
+        print(f"⚠️ [score_batch] {len(score_errors)} errors: {score_errors[0]}")
         await notify_llm_errors("score_batch", score_errors, config)
 
-    # 3. 关键词去重校验
+    # 3. Keyword deduplication.
     deduplicate_by_keywords(scored, config)
 
     is_new_file = not os.path.exists(fetch_file)
     if is_new_file:
         cleanup_old_files(days=config["filter"]["keep_days"], data_dir=data_dir)
 
-    # 添加 fetched_at 时间戳
+    # Add fetched_at timestamp.
     for entry in scored:
         entry["fetched_at"] = now_local().isoformat()
         if isinstance(entry.get("published"), datetime):
@@ -481,13 +502,13 @@ async def run_fetch_job(config: Dict):
                 entry["published"].astimezone(get_timezone(config)).isoformat()
             )
 
-    # 批量保存到 JSON 文件
+    # Save entries to the JSON file.
     from datetime import date
 
     meta = {"date": date.today().isoformat()}
     append_entries(fetch_file, scored, meta)
 
-    print(f"💾 已保存到 {fetch_file}")
+    print(f"💾 Saved to {fetch_file}")
 
     immediate_config = config.get("delivery", {}).get("immediate", {})
     immediate_enabled = immediate_config.get("enabled", True)
@@ -501,18 +522,18 @@ async def run_fetch_job(config: Dict):
         if os.path.exists(notify_file):
             existing_notifications = Path(notify_file).read_text(encoding="utf-8", errors="ignore").count("------")
         if existing_notifications >= daily_limit:
-            print(f"ℹ️ 已达到每日热点推送上限 ({daily_limit})，跳过即时推送")
+            print(f"ℹ️ Daily hot-news delivery limit reached ({daily_limit}); skipping immediate delivery")
             hot_entries = []
     if hot_entries:
-        print(f"🔥 发现 {len(hot_entries)} 条热点消息，即时推送...")
+        print(f"🔥 Found {len(hot_entries)} hot entries; sending immediate delivery...")
 
-        # 加载近期已推送内容（仅供 LLM 查重，避免风格趋同）
+        # Load recent sent content for LLM deduplication and style diversity.
         context_days = config["filter"]["context_days"]
         recent_notify = load_recent_notify_content(context_days, data_dir=data_dir)
         recent_push = load_recent_push_content(context_days, data_dir=data_dir)
         recent_context = (
-            f"=== 近期即时推送 ===\n{recent_notify}\n\n"
-            f"=== 近期汇总推送 ===\n{recent_push}"
+            f"=== Recent immediate deliveries ===\n{recent_notify}\n\n"
+            f"=== Recent digest deliveries ===\n{recent_push}"
         )
 
         push_content, immediate_push_error = await generate_immediate_push(
@@ -526,41 +547,41 @@ async def run_fetch_job(config: Dict):
             )
 
         if not push_content:
-            print("⚠️ 即时推送内容生成失败，跳过本次热点推送")
+            print("⚠️ Immediate delivery content generation failed; skipping hot-news delivery")
             print(
-                f"✅ Fetch Job 完成 | 新消息: {len(scored)} 条 | 热点: {len(hot_entries)} 条"
+                f"✅ Fetch job completed | new entries: {len(scored)} | hot entries: {len(hot_entries)}"
             )
             return
 
-        # 检查是否有实际内容需要推送
+        # Check whether there is actual content to deliver.
         if no_content_marker in push_content:
-            print(f"ℹ️ 无新内容需要推送 (LLM判定为重复内容)")
+            print("ℹ️ No new content to deliver; LLM marked it as duplicate content")
         else:
-            # 提取标题并构建 metadata
+            # Extract title and build metadata.
             now = now_local(config)
             timestamp = now.strftime("%Y-%m-%d %H:%M")
             content_without_title, metadata = parse_immediate_push_with_metadata(
-                push_content, f"🚨 News Agent 快讯 | {timestamp}"
+                push_content, _default_immediate_title(config, timestamp)
             )
             metadata["pushTime"] = now.isoformat()
 
             await send_to_platforms(
                 content_without_title,
                 config["push"],
-                "🚨 News Agent 快讯 | " + metadata["title"],
+                _immediate_title_prefix(config) + metadata["title"],
                 metadata=metadata,
             )
-            # 保存即时推送内容到notify文件
+            # Save immediate delivery content to the notify file.
             notify_file = get_notify_file(data_dir=data_dir)
             save_notify_file(notify_file, content_without_title, metadata)
-            print(f"💾 已保存即时推送到 {notify_file}")
+            print(f"💾 Saved immediate delivery to {notify_file}")
 
-            # 4. 记录已发送链接到 sent-history.json
+            # 4. Record sent links in sent-history.json.
             sent_links = [e.get("link") for e in hot_entries if e.get("link")]
             mark_links_as_sent(sent_links, data_dir=config.get("storage", {}).get("data_dir", "news-data"))
-            print(f"💾 已把 {len(sent_links)} 条快讯链接记录到已发送历史")
+            print(f"💾 Recorded {len(sent_links)} immediate-delivery links in sent history")
 
-    print(f"✅ Fetch Job 完成 | 新消息: {len(scored)} 条 | 热点: {len(hot_entries)} 条")
+    print(f"✅ Fetch job completed | new entries: {len(scored)} | hot entries: {len(hot_entries)}")
 
 
 async def run_push_job(config: Dict):
@@ -579,7 +600,7 @@ async def run_push_job(config: Dict):
 
 
 async def _run_default_push(config: Dict):
-    """晚报或非早报时段:沿用原有纯 RSS digest 流程,委托给 run_rss_section"""
+    """Run the default RSS-only digest flow for evening or non-morning schedules."""
     now = now_local(config)
     policy = active_delivery_schedule(config, now)
     rss_md, metadata, rss_err = await run_rss_section(config, now, max_items=policy.get("max_items"))
@@ -590,10 +611,10 @@ async def _run_default_push(config: Dict):
         raise RuntimeError(f"RSS section failed: {rss_err}")
 
     if not rss_md:
-        # run_rss_section 在无新消息时已打印 "ℹ️ RSS: 无新消息"
+        # run_rss_section already logs when there are no new RSS entries.
         return
 
-    # metadata 缺失兜底:parse_digest_with_metadata 失败 / LLM 输出无 frontmatter 时可能返回 None
+    # Metadata fallback for missing frontmatter or parse failures.
     if not metadata:
         date_str = now.strftime("%Y-%m-%d")
         metadata = {
@@ -625,9 +646,9 @@ async def _run_default_push(config: Dict):
         profile="default",
         metadata=metadata,
     )
-    print(f"💾 已保存到 {push_file}")
+    print(f"💾 Saved to {push_file}")
     
-    # 记录已发送历史
+    # Record sent history.
     try:
         min_score = config["filter"]["min_score"]
         context_days = config["filter"]["context_days"]
@@ -642,20 +663,23 @@ async def _run_default_push(config: Dict):
         )
         sent_links = [e.get("link") for e in to_push if e.get("link")]
         mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 已把 {len(sent_links)} 条晚报链接记录到已发送历史")
+        print(f"💾 Recorded {len(sent_links)} digest links in sent history")
     except Exception as e:
-        print(f"⚠️ 记录已发送历史失败: {e}")
+        print(f"⚠️ Failed to record sent history: {e}")
 
-    print(f"✅ Push Job 完成 | 推送条目: {rss_count}")
+    print(f"✅ Push job completed | delivered entries: {rss_count}")
 
 
 
 async def _run_morning_push(config: Dict):
-    """早报四模块编排:RSS/GH/HN 并发 → insights 串行 → sentinel 拼装 → 推送 → 落盘。
+    """Run the morning four-section workflow.
 
-    失败语义:
-    - RSS 失败 → 整体抛 RuntimeError (核心承诺不变)
-    - GH/HN/insights 失败 → 该段省略 + 告警,其他段照推
+    RSS/GitHub/Hacker News run concurrently, insights runs after them, then
+    sections are assembled with sentinels, delivered, and saved.
+
+    Failure semantics:
+    - RSS failure raises RuntimeError because it is the core section.
+    - GitHub/Hacker News/insights failures omit that section and continue.
     """
     now = now_local(config)
 
@@ -666,8 +690,8 @@ async def _run_morning_push(config: Dict):
         run_hackernews_section(config, now),
     )
 
-    # 早报场景:digest 的 metadata 通常会被 insights 段覆盖,
-    # 但保留以便在 insights 失败时作为兜底来源(title 关键词 / lead / highlights)
+    # In morning briefs, insights usually overrides digest metadata.
+    # Keep digest metadata as fallback if insights fails.
     rss_md, digest_meta, rss_err = rss_result
     gh_md, gh_err = gh_result
     hn_md, hn_err = hn_result
@@ -691,7 +715,7 @@ async def _run_morning_push(config: Dict):
         print(f"⚠️ [insights] {insights_err}")
         await notify_llm_errors("insights", [insights_err], config)
 
-    # 如果 insights 失败,优先用 digest metadata 兜底;两者都缺再走默认
+    # If insights fails, prefer digest metadata as fallback, then defaults.
     if not metadata:
         date_str = now.strftime("%Y-%m-%d")
         fallback = digest_meta or {}
@@ -722,7 +746,7 @@ async def _run_morning_push(config: Dict):
     )
 
     if not final.strip():
-        print("ℹ️ 早报无任何段输出,跳过推送")
+        print("ℹ️ Morning brief has no section output; skipping delivery")
         return
 
     await send_to_platforms(
@@ -740,9 +764,9 @@ async def _run_morning_push(config: Dict):
     save_push_file(
         push_file, final, rss_count, rss_count, profile="morning", metadata=metadata
     )
-    print(f"💾 已保存早报到 {push_file}")
+    print(f"💾 Saved morning brief to {push_file}")
     
-    # 记录已发送历史
+    # Record sent history.
     try:
         min_score = config["filter"]["min_score"]
         context_days = config["filter"]["context_days"]
@@ -757,72 +781,71 @@ async def _run_morning_push(config: Dict):
         )
         sent_links = [e.get("link") for e in to_push if e.get("link")]
         mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 已把 {len(sent_links)} 条早报链接记录到已发送历史")
+        print(f"💾 Recorded {len(sent_links)} morning-brief links in sent history")
     except Exception as e:
-        print(f"⚠️ 记录已发送历史失败: {e}")
+        print(f"⚠️ Failed to record sent history: {e}")
 
 
 
 async def fetch_loop(config: Dict):
-    """Fetch循环 - 修复时间漂移并支持优雅退出"""
+    """Fetch loop with drift correction and graceful cancellation."""
     import time
 
     interval_seconds = config["schedule"]["fetch_interval_minutes"] * 60
-    print(f"🔄 Fetch循环已启动 | 严格间隔: {interval_seconds / 60}分钟")
+    print(f"🔄 Fetch loop started | strict interval: {interval_seconds / 60} minutes")
 
     while True:
-        start_time = time.monotonic()  # 使用 monotonic 避免系统时间修改影响
+        start_time = time.monotonic()  # Use monotonic time to avoid system clock changes.
 
         try:
             await run_fetch_job(config)
         except asyncio.CancelledError:
-            print("⚠️ Fetch循环被外部取消，正在安全退出...")
-            break  # 允许外部取消任务
+            print("⚠️ Fetch loop cancelled externally; exiting safely...")
+            break
         except Exception as e:
-            print(f"❌ Fetch Job 失败: {e}")
+            print(f"❌ Fetch job failed: {e}")
 
-        # 计算任务耗时
+        # Calculate job duration.
         elapsed = time.monotonic() - start_time
-        # 计算还需要睡多久（如果任务耗时超过间隔，则不睡，立刻进入下一次）
+        # Calculate remaining sleep time; skip sleep if the job exceeded the interval.
         sleep_time = max(0.0, interval_seconds - elapsed)
 
         if sleep_time > 0:
-            print(f"⏰ 下次抓取: {sleep_time / 60:.1f}分钟后")
+            print(f"⏰ Next fetch in {sleep_time / 60:.1f} minutes")
 
         try:
             await asyncio.sleep(sleep_time)
         except asyncio.CancelledError:
-            print("⚠️ 睡眠被中断，Fetch循环安全退出...")
+            print("⚠️ Sleep interrupted; fetch loop exited safely")
             break
 
 
 async def push_loop(config: Dict):
-    """Push循环 - 无状态 croniter + 原生异步睡眠"""
+    """Push loop using stateless croniter scheduling and native async sleep."""
     cron_list = config["schedule"]["push_cron"]
     tz = get_timezone(config)
 
-    # 1. 启动前预校验 cron 表达式，过滤掉无效配置
+    # 1. Validate cron expressions before starting and ignore invalid entries.
     valid_crons = []
     for cron in cron_list:
         if croniter.is_valid(cron):
             valid_crons.append(cron)
         else:
-            print(f"⚠️ 忽略无效的 cron 表达式: '{cron}'")
+            print(f"⚠️ Ignoring invalid cron expression: '{cron}'")
 
     if not valid_crons:
-        print("❌ 没有有效的推送时间配置，Push循环退出")
+        print("❌ No valid delivery schedule configured; push loop exited")
         return
 
-    print(f"📤 Push循环已启动 | 定时: {', '.join(valid_crons)} | 时区: {tz}")
+    print(f"📤 Push loop started | schedules: {', '.join(valid_crons)} | timezone: {tz}")
 
-    # 2. 主循环
+    # 2. Main loop.
     while True:
         try:
             now = datetime.now(tz)
 
-            # 💡 核心优化：无状态计算。
-            # 每次都基于此刻的真实时间，动态计算所有有效 cron 的下一次时间，取最近的一个。
-            # 这样无论 run_push_job 执行多久，或者系统休眠过，永远都不会算错。
+            # Stateless calculation: compute the next run from the real current time
+            # on each loop so long jobs or system sleep do not drift the schedule.
             next_push = min(
                 croniter(cron, now).get_next(datetime) for cron in valid_crons
             )
@@ -831,87 +854,86 @@ async def push_loop(config: Dict):
 
             if wait_seconds > 0:
                 print(
-                    f"⏰ 下次推送: {next_push.strftime('%Y-%m-%d %H:%M:%S')} (等待 {wait_seconds / 60:.1f} 分钟)"
+                    f"⏰ Next delivery: {next_push.strftime('%Y-%m-%d %H:%M:%S')} (wait {wait_seconds / 60:.1f} minutes)"
                 )
 
-                # 💡 核心优化：直接 Sleep。asyncio 天生支持被 CancelledError 瞬间打断
+                # Direct async sleep can be interrupted immediately by CancelledError.
                 await asyncio.sleep(wait_seconds)
 
-            # 到达推送时间，执行推送
-            print(f"📤 执行推送: {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')}")
+            # Run delivery at the scheduled time.
+            print(f"📤 Running delivery: {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')}")
             await run_push_job(config)
 
-            # 增加 1 秒缓冲：防止 run_push_job 执行过快（不到 1 秒），
-            # 导致下一个循环的 now 仍停留在当前秒，croniter 算出重复的时间点。
+            # Add a 1-second buffer to avoid repeated cron hits within the same second.
             await asyncio.sleep(1)
 
         except asyncio.CancelledError:
-            print("⚠️ Push循环收到取消信号，安全退出...")
-            break  # 直接 break 退出循环即可
+            print("⚠️ Push loop received cancellation; exiting safely...")
+            break
         except Exception as e:
-            print(f"❌ Push 循环异常: {e}")
-            # 遇到未知异常时休眠 60 秒，防止死循环疯狂报错打满日志
+            print(f"❌ Push loop error: {e}")
+            # Sleep briefly after unexpected errors to avoid a tight error loop.
             await asyncio.sleep(60)
 
 
 async def cmd_check(config: Dict) -> int:
-    """校验 LLM 接口可达性（部署期使用，运行期不再校验）"""
-    print("🔍 校验 LLM 接口...")
+    """Check LLM API connectivity for setup-time validation."""
+    print("🔍 Checking LLM API connectivity...")
     try:
         await check_llm_available(config["llm"])
     except Exception as e:
-        print(f"❌ LLM 接口不可用: {e}")
+        print(f"❌ LLM API is not available: {e}")
         return 1
-    print("✅ LLM 接口可用")
+    print("✅ LLM API is available")
     return 0
 
 
 async def cmd_fetch(config: Dict) -> int:
-    """单次抓取任务。"""
+    """Run one fetch job."""
     try:
         await run_fetch_job(config)
         return 0
     except Exception as e:
-        print(f"❌ Fetch 任务失败: {e}")
+        print(f"❌ Fetch job failed: {e}")
         return 1
 
 
 async def cmd_push(config: Dict) -> int:
-    """单次推送任务。"""
+    """Run one delivery job."""
     try:
         await run_push_job(config)
         return 0
     except Exception as e:
-        print(f"❌ Push 任务失败: {e}")
+        print(f"❌ Push job failed: {e}")
         return 1
 
 
 async def cmd_loop(config: Dict) -> int:
-    """长跑模式（本地开发/调试用）"""
-    print("🔍 检查 LLM 接口可用性...")
+    """Run long-lived loops for local development and debugging."""
+    print("🔍 Checking LLM API connectivity...")
     try:
         await check_llm_available(config["llm"])
-        print("✅ LLM 接口可用")
+        print("✅ LLM API is available")
     except Exception as e:
-        print(f"❌ LLM 接口不可用: {e}")
+        print(f"❌ LLM API is not available: {e}")
         return 1
     await asyncio.gather(fetch_loop(config), push_loop(config))
     return 0
 
 
 async def cmd_rss(config: Dict) -> int:
-    """单独跑一次 RSS digest 板块,打印结果不推送"""
-    print("📰 RSS Digest 单板块运行")
+    """Run the RSS digest section once; print only, do not send."""
+    print("📰 Running RSS Digest section")
     try:
         md, meta, err = await run_rss_section(config, now=now_local(config))
     except Exception as e:
-        print(f"❌ RSS 板块失败: {e}")
+        print(f"❌ RSS section failed: {e}")
         return 1
     if err:
         print(f"❌ {err}")
         return 1
     if not md:
-        print("ℹ️ 本次无内容")
+        print("ℹ️ No content this time")
         return 0
     print("\n" + "=" * 60)
     print("📑 metadata:")
@@ -928,18 +950,18 @@ async def cmd_rss(config: Dict) -> int:
 
 
 async def cmd_github(config: Dict) -> int:
-    """单独跑一次 GitHub trending 板块,打印结果不推送"""
-    print("⭐ GitHub Trending 单板块运行")
+    """Run the GitHub Trending section once; print only, do not send."""
+    print("⭐ Running GitHub Trending section")
     try:
         md, err = await run_github_section(config, now=now_local(config))
     except Exception as e:
-        print(f"❌ GitHub 板块失败: {e}")
+        print(f"❌ GitHub section failed: {e}")
         return 1
     if err:
         print(f"❌ {err}")
         return 1
     if not md:
-        print("ℹ️ 本次无内容")
+        print("ℹ️ No content this time")
         return 0
     print("\n" + "=" * 60)
     print(md)
@@ -948,18 +970,18 @@ async def cmd_github(config: Dict) -> int:
 
 
 async def cmd_hackernews(config: Dict) -> int:
-    """单独跑一次 Hacker News 板块,打印结果不推送"""
-    print("🟧 Hacker News 单板块运行")
+    """Run the Hacker News section once; print only, do not send."""
+    print("🟧 Running Hacker News section")
     try:
         md, err = await run_hackernews_section(config, now=now_local(config))
     except Exception as e:
-        print(f"❌ Hacker News 板块失败: {e}")
+        print(f"❌ Hacker News section failed: {e}")
         return 1
     if err:
         print(f"❌ {err}")
         return 1
     if not md:
-        print("ℹ️ 本次无内容")
+        print("ℹ️ No content this time")
         return 0
     print("\n" + "=" * 60)
     print(md)
@@ -970,27 +992,27 @@ async def cmd_hackernews(config: Dict) -> int:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="news-agent",
-        description="News Agent 本地资讯推送服务",
+        description="News Agent local news delivery service",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("check", help="校验 LLM 接口可达性")
-    sub.add_parser("fetch", help="单次抓取并退出")
-    sub.add_parser("push", help="单次推送并退出")
-    sub.add_parser("loop", help="长跑模式（开发/调试用）")
-    sub.add_parser("rss", help="单独跑一次 RSS Digest 板块（仅打印,不推送）")
-    sub.add_parser("github", help="单独跑一次 GitHub Trending 板块（仅打印,不推送）")
-    sub.add_parser("hackernews", help="单独跑一次 Hacker News 板块（仅打印,不推送）")
-    serve = sub.add_parser("serve", help="启动本地 Web/API 服务和调度器")
+    sub.add_parser("check", help="Check LLM API connectivity")
+    sub.add_parser("fetch", help="Run one fetch job and exit")
+    sub.add_parser("push", help="Run one delivery job and exit")
+    sub.add_parser("loop", help="Run long-lived loops for development/debugging")
+    sub.add_parser("rss", help="Run the RSS Digest section once; print only, do not send")
+    sub.add_parser("github", help="Run the GitHub Trending section once; print only, do not send")
+    sub.add_parser("hackernews", help="Run the Hacker News section once; print only, do not send")
+    serve = sub.add_parser("serve", help="Start the local Web/API service and scheduler")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", default=12301, type=int)
-    sub.add_parser("mcp", help="启动 stdio MCP 服务")
-    service = sub.add_parser("service", help="管理登录后启动的本地服务")
+    sub.add_parser("mcp", help="Start the stdio MCP service")
+    service = sub.add_parser("service", help="Manage the local login-start service")
     service.add_argument("action", choices=["install", "uninstall", "start", "stop", "status"])
     return parser.parse_args()
 
 
 def main() -> int:
-    print("News Agent 本地资讯推送服务")
+    print("News Agent local news delivery service")
     args = _parse_args()
 
     if args.command == "serve":
@@ -1008,9 +1030,9 @@ def main() -> int:
 
     try:
         config = load_config()
-        print("✅ 配置加载成功")
+        print("✅ Configuration loaded successfully")
     except Exception as e:
-        print(f"❌ 加载配置失败: {e}")
+        print(f"❌ Failed to load configuration: {e}")
         return 1
 
     handlers = {
@@ -1029,5 +1051,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\n👋 程序已退出")
+        print("\n👋 Program exited")
         sys.exit(0)

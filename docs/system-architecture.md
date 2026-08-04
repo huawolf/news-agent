@@ -23,7 +23,7 @@ Refer to [roadmap.md](roadmap.md) for milestone execution order and pending task
 
 - No multi-tenant isolation, user accounts, or team collaboration features.
 - No public or LAN exposure of local control plane APIs.
-- Generic feed additions are limited to RSS/Atom feeds in Phase 1; GitHub Trending and Hacker News remain built-in sections.
+- Generic user-added sources are RSS/Atom feeds. Non-RSS integrations are handled as built-in signal adapters under `sections.signals`.
 
 ### 1.3 Core Principles
 
@@ -147,7 +147,23 @@ Submit RSS URL
 Feed sources track runtime metrics: enablement status, last successful fetch timestamp, consecutive failure counter, last error message, and auto-pause flags.
 
 ### 4.1.1 24-Hour Publication Cutoff Filter
-All fetched news entries (RSS, Hacker News, etc.) are subjected to a strict 24-hour publication window (`fetch_lookback_minutes: 1440`). Entries with publication dates older than 24 hours prior to the current fetch time are automatically discarded before LLM scoring and persistence.
+All fetched news entries (RSS, built-in signals, Hacker News, etc.) are subjected to a strict publication window (`fetch_lookback_minutes: 1440` by default). Entries with publication dates older than the configured lookback are automatically discarded before LLM scoring and persistence.
+
+### 4.1.2 Built-In Signal Adapters
+
+`sections.signals` feeds non-RSS and curated sources into the same entry contract used by RSS (`title`, `link`, `published`, `source`, `content`, `tags`, `score`, `summary`). Supported adapters include:
+
+- GitHub Trending total, JavaScript, and Chinese variants via HTML scraping.
+- Product Hunt via GraphQL when `PH_TOKEN` is configured.
+- Reddit via no-key pullpush.io fallback, then Reddit public JSON fallback.
+- V2EX create, share, and programmer nodes via public JSON API.
+- App Store China, Taiwan, US, Japan, and Korea via Apple RSS JSON.
+- 36Kr, Sspai, and OSChina via RSS.
+- Jike AI Explore, AI Discussion, and Engineers topics via RSSHub.
+
+These entries are scored, deduplicated, stored, and delivered through the existing fetch pipeline.
+
+Signal adapters apply a pre-scoring quality gate before entries reach the LLM. Product Hunt, App Store, Reddit, V2EX, Jike, and domestic media adapters keep AI / LLM / Agent / model-driven application signals and drop obvious noise such as entertainment-only apps, generic local services, roundup posts, casual speculation, unrelated hardware financing, and stale items outside the lookback window. GitHub variants allow AI infrastructure and developer-tool opportunities, but still filter unrelated trending repositories.
 
 ### 4.2 Preference Prompting & Deterministic Re-ranking
 

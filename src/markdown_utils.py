@@ -50,7 +50,14 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
     返回 (metadata_dict, body)。无 frontmatter / YAML 解析失败 / 非 dict 时返回
     ({}, 原文) —— 保证降级路径不丢内容,调用方可凭 metadata_dict 是否为空判定。
     """
+    original_text = text
     text_stripped = text.strip()
+    fenced_match = re.fullmatch(
+        r"```(?:markdown|md)?\s*\n(.*)\n```", text_stripped, flags=re.DOTALL | re.IGNORECASE
+    )
+    if fenced_match:
+        text_stripped = fenced_match.group(1).strip()
+
     match = _FRONTMATTER_RE.match(text_stripped)
     if match:
         try:
@@ -65,7 +72,9 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
     if lines:
         first_line = lines[0].strip()
         meta_keys = ("title:", "title：", "lead:", "lead：", "highlights:", "highlights：")
-        if any(first_line.lower().startswith(k) for k in meta_keys):
+        if first_line == "---" or any(
+            first_line.lower().startswith(k) for k in meta_keys
+        ):
             yaml_lines = []
             body_lines = []
             in_body = False
@@ -85,6 +94,12 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
                 # 统一替换中文冒号为英文冒号+空格，并确保所有 YAML 键的冒号后有空格
                 yaml_content = "\n".join(yaml_lines).replace("：", ": ")
                 yaml_content = re.sub(r"^(\s*\w+):([^\s])", r"\1: \2", yaml_content, flags=re.MULTILINE)
+                # LLMs sometimes use visual bullets instead of YAML's `-` for
+                # highlights. Normalize them so metadata is stripped from the
+                # delivery body even when the generated frontmatter is loose.
+                yaml_content = re.sub(
+                    r"^(\s*)[•·*]\s+", r"\1- ", yaml_content, flags=re.MULTILINE
+                )
                 try:
                     meta = yaml.safe_load(yaml_content) or {}
                     if isinstance(meta, dict) and any(k in meta for k in ("title", "lead", "highlights")):
@@ -92,7 +107,7 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
                 except yaml.YAMLError:
                     pass
 
-    return {}, text
+    return {}, original_text
 
 
 def normalize_str_list(value: Any) -> List[str]:

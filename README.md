@@ -1,6 +1,6 @@
 # News Agent
 
-News Agent is a local, personal news service. It collects RSS feeds, GitHub Trending, and Hacker News, uses an OpenAI-compatible LLM to rank and summarize items, and delivers digests to Feishu or Discord.
+News Agent is a local, personal news service. It collects RSS feeds, built-in signal sources, GitHub Trending, and Hacker News, uses an OpenAI-compatible LLM to rank and summarize items, and delivers digests to Feishu or Discord.
 
 It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio MCP server all manage the same configuration and jobs.
 
@@ -8,7 +8,7 @@ It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio M
 
 ## Features
 
-- Aggregate RSS feeds, GitHub Trending, and Hacker News.
+- Aggregate RSS feeds, GitHub Trending, Hacker News, Product Hunt, Reddit, App Store new apps, V2EX, 36Kr, Sspai, OSChina, Jike topics, and other built-in signal sources.
 - Rank, filter, deduplicate, and summarize content with an LLM.
 - Add, update, verify, and remove RSS sources from the web console, API, or MCP.
 - Set interests, exclusions, source weights, delivery times, and item limits.
@@ -51,6 +51,7 @@ Add your credentials to `.env`, or edit them in the **Secrets and connection set
 DEEPSEEK_API_KEY=your_llm_api_key
 FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...
 # DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+# PH_TOKEN=optional_product_hunt_developer_token
 ```
 
 The first run creates the local configuration from [config.json.example](config.json.example). Use the web console to manage feeds, preferences, and schedules. For file-based configuration, copy the example and edit only the settings you need.
@@ -58,6 +59,8 @@ The first run creates the local configuration from [config.json.example](config.
 Important settings:
 
 - `preferences`: interests, exclusions, source weights, language preference, and diversity limits.
+- `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
+- `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
 - `delivery.schedules`: cron schedules, sections, and `max_items` per delivery.
 - `delivery.immediate`: high-score alert threshold and daily limit.
 - `push`: enable Feishu, Discord, or a custom endpoint.

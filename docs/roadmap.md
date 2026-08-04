@@ -6,7 +6,7 @@
 
 ## Current Baseline
 
-- **Implemented:** RSS fetching, LLM scoring, keyword deduplication, immediate push notifications, RSS / GitHub Trending / Hacker News / Insights sections, Feishu / Discord / custom webhook integration.
+- **Implemented:** RSS fetching, built-in signal adapters, LLM scoring, keyword deduplication, immediate push notifications, RSS / GitHub Trending / Hacker News / Insights sections, Feishu / Discord / custom webhook integration.
 - **Implemented:** Dynamic RSS feed addition/blocking in `config.json`, file persistence in `news-data/` (JSON/Markdown).
 - **Archived:** Legacy Linux `systemd timer` and `journald` deployment archived; replaced by cross-platform daemon architecture.
 - **Completed:** Local Web/API, stdio MCP server, natural language preference ranking, built-in APScheduler, rolling file logger, macOS/Windows service lifecycle management.
@@ -89,7 +89,8 @@
 
 - [ ] Optimize digest formatting and prompts: prioritize official reference links and enhance depth of insights.
 - [ ] Fetch linked web page content for richer LLM summaries.
-- [ ] Expand supported feed source adapters and verified RSS registries.
+- [x] Expand supported source adapters with Product Hunt, Reddit fallback, GitHub variants, V2EX, App Store regions, domestic RSS, and RSSHub-based Jike topics.
+- [ ] Expand verified RSS registries and source health diagnostics.
 - [ ] Add delivery integrations for Zhihu, RedNote (Xiaohongshu), or custom personal blogs.
 - [ ] LLM API fallback handling, cost monitoring, and usage telemetry.
 - [ ] Desktop notifications for major configuration updates or push failures.

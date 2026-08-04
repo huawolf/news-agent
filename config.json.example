@@ -62,6 +62,31 @@
             "algolia_base": "https://hn.algolia.com/api/v1",
             "jinaTokenName": "JINA_API_KEY"
         },
+        "signals": {
+            "enabled": true,
+            "request_timeout": 10,
+            "max_items_per_source": 5,
+            "rsshub_base": "https://rsshub.umzzz.com",
+            "sources": {
+                "github-trending": true,
+                "github-trending-js": true,
+                "github-trending-zh": true,
+                "36kr": true,
+                "sspai": true,
+                "oschina": true,
+                "v2ex": true,
+                "jike-ai-explore": true,
+                "jike-ai-discuss": true,
+                "jike-engineer": true,
+                "appstore-cn": true,
+                "appstore-tw": true,
+                "appstore-us": true,
+                "appstore-jp": true,
+                "appstore-kr": true,
+                "producthunt": true,
+                "reddit": true
+            }
+        },
         "insights": {
             "enabled": true
         }
@@ -75,8 +100,8 @@
         "model": "deepseek-v4-flash",
         "baseUrl": "https://api.deepseek.com",
         "apiKeyName": "DEEPSEEK_API_KEY",
-        "request_timeout": 120,
-        "max_prompt_chars": 30000,
+        "request_timeout": 240,
+        "max_prompt_chars": 12000,
         "max_concurrent_batches": 3,
         "prompts": {
             "score_batch": "prompts/score_batch.md",
