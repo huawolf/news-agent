@@ -94,6 +94,7 @@
 - [x] Implement Windows Task Scheduler login task installer script.
 - [x] Migrate Linux deployment to user-level `systemd` service executing `news-agent serve`.
 - [x] Implement unified `install`, `uninstall`, `start`, `stop`, `restart`, and `status` service commands; repeated installs restart the existing service.
+- [x] Add a root-level operator `SKILL.md` for non-browser agent installation, validated configuration, verification, and confirmed delivery.
 - [ ] Perform full verification on clean macOS, Windows, and Linux environments (login autostart, system reboot, sleep recovery, logging, uninstall).
 
 **Acceptance:** All three target platforms share identical ports, configurations, data directories, log formats, Web UI, and MCP capabilities.

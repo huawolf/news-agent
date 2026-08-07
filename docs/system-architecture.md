@@ -342,11 +342,18 @@ Local security: API binds to `127.0.0.1:12301` and supports optional token verif
 
 Stdio-based MCP server providing tools for local AI agents:
 - Status & Config: `get_status`, `get_config_summary`
-- Feed Management: `list_sources`, `add_rss_source`, `verify_source`, `update_source`, `remove_source`
-- Preferences & Schedule: `set_preferences`, `set_delivery_schedule`, `set_delivery_limits`
+- Feed Management: `list_sources`, `add_rss_source`, `verify_source`, `remove_source`
+- Preferences & Schedule: `set_preferences`, `set_output_language`, `set_delivery_schedule`
 - Job & Log Operations: `preview_digest`, `run_fetch`, `run_push`, `get_job`, `get_recent_logs`
 
 High-impact operations (`remove_source`, `run_push`) require explicit `confirm=True` parameter.
+
+The repository also distributes a root-level `SKILL.md` for agents
+performing initial installation and configuration without a browser. It routes
+secrets to `.env`, supported configuration mutations through the validated local
+REST API, and requires health and model checks before preview or explicitly
+confirmed delivery. MCP handoff occurs after initial LLM and delivery credential
+setup because those secret-bearing operations are not MCP tools.
 
 ---
 

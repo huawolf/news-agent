@@ -21,7 +21,7 @@ It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio M
 
 - macOS, Windows, or Linux
 - [uv](https://docs.astral.sh/uv/)
-- An OpenAI-compatible LLM API key
+- An API key for an OpenAI Chat, OpenAI Responses, or Anthropic Messages endpoint
 
 The installer scripts for macOS, Linux, and Windows will automatically install `uv` for the current user if it is not already available.
 
@@ -62,7 +62,7 @@ Important settings:
 - `llm`: model, endpoint, API-key environment variable, and protocol. The Web
   console detects OpenAI Chat Completions, OpenAI Responses, or Anthropic
   Messages from the endpoint and model name, allows manual override, and can
-  test the current connection before saving.
+  save and test the current connection.
 - `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
 - `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
 - `log.retention_days`: number of daily log directories to retain; defaults to 30 days.
@@ -115,6 +115,11 @@ The MCP server is intended for a local agent process:
 ```
 
 Available MCP tools include source management, preference and schedule updates, manual fetch/push jobs, digest previews, job status, and recent logs. `run_push` requires explicit confirmation.
+
+AI agents performing installation or initial configuration should follow the
+[News Agent Operator skill](SKILL.md). It defines the
+non-browser workflow for secret handling, API configuration, service restart,
+health checks, model testing, previews, and confirmed delivery.
 
 ## Data and Logs
 
