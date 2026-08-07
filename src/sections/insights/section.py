@@ -27,7 +27,7 @@ async def run_insights_section(
 
     md, err = await generate_trend_insights(sections, config["llm"])
     if err:
-        return "", None, f"generate_trend_insights: {err}"
+        return "", None, err
 
     if now is None:
         now = datetime.now()

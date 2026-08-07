@@ -19,6 +19,7 @@
 
 - [x] Define cross-platform user data directory and path resolution.
 - [x] Implement application file logging: `app`, `fetch`, `push`, `web`, `mcp`, `audit` with date-based rotation and auto-cleanup.
+- [x] Retain daily application log directories for 30 days by default.
 - [x] Define `RunRecord` and persist `fetch`/`push`/`preview` statuses, execution sources, stats, and error summaries.
 - [x] Extract `ConfigService`: schema validation, migration logic, inter-process file locks, atomic writes, backups, revision tracking, and auditing.
 - [x] Maintain backwards compatibility for CLI `fetch` and `push` commands.
@@ -32,6 +33,7 @@
 - [x] Connect `fetch`, `push`, and `preview` tasks to unified `JobExecutor`.
 - [x] Implement mutex locking for identical job types, returning active job ID on collision, and job status querying.
 - [x] Integrate `APScheduler` supporting fetch intervals and multiple delivery cron schedules.
+- [x] Default unconfigured delivery to 10:00 and 20:00 daily with 10 items per delivery while preserving explicit user schedules.
 - [x] Implement dynamic scheduler reloading upon configuration changes without service interruption.
 - [ ] Define and test missed job execution strategy after system sleep/restart.
 
@@ -46,6 +48,8 @@
 - [x] Implement 5 Web UI pages: Dashboard/Settings, Feed Sources, Preferences, Schedules, and Execution Logs.
 - [x] Add optional local token protection without exposing sensitive secrets in responses.
 - [x] Support Web UI triggers for manual fetch, preview, and push execution.
+- [x] Add a contextual Feishu Webhook setup tooltip beside its settings field.
+- [x] Make the latest headlines the first and default Web UI tab.
 
 **Acceptance:** Users can fully manage feeds, schedules, limits, preferences, and tasks without editing raw JSON files.
 
@@ -65,8 +69,14 @@
 ### M5: Personalization & Feed Health
 
 - [x] Implement topic inclusion/exclusion, source weighting, language preferences, and diversity limits.
+- [x] Calibrate LLM scoring so actionable stock-investment news, evidence-backed startup opportunities, and major AI advances have equal priority.
+- [x] Limit Feishu scoring alerts to LLM connection failures and timeouts while retaining all processing errors in local logs.
+- [x] Combine RSS and Hacker News into one headline list capped at 10, while keeping GitHub separately numbered and capped at 3.
+- [x] Strip metadata from outgoing message bodies.
+- [x] Use a 3x ranked candidate pool, fill undersized digests, and mark only links actually present in delivered content as sent.
 - [x] Implement deterministic re-ranking and digest item truncation on top of base LLM scores.
 - [x] Implement RSS validation, explicit private network URL protection (SSRF defense), and URL deduplication.
+- [x] Normalize sources into six bilingual content categories and support filtering and URL removal from the active fetch list.
 - [ ] Implement feed fetch health tracking, automatic feed pausing, and ranking rationale display in previews.
 
 **Acceptance:** User preferences reliably influence article ranking; failing feeds do not degrade long-term fetch performance.
@@ -89,7 +99,7 @@
 
 - [ ] Optimize digest formatting and prompts: prioritize official reference links and enhance depth of insights.
 - [ ] Fetch linked web page content for richer LLM summaries.
-- [x] Expand supported source adapters with Product Hunt, Reddit fallback, GitHub variants, V2EX, App Store regions, domestic RSS, and RSSHub-based Jike topics.
+- [x] Expand supported source adapters with Product Hunt, Reddit fallback, GitHub variants, V2EX, App Store regions, domestic RSS, RSSHub-based Jike topics, and incremental Google News topic feeds for China and the United States.
 - [ ] Expand verified RSS registries and source health diagnostics.
 - [ ] Add delivery integrations for Zhihu, RedNote (Xiaohongshu), or custom personal blogs.
 - [ ] LLM API fallback handling, cost monitoring, and usage telemetry.

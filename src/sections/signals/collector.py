@@ -16,6 +16,8 @@ import aiohttp
 import feedparser
 from bs4 import BeautifulSoup
 
+from src.sections.signals.google_news import google_news_source_catalog
+
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -56,28 +58,43 @@ PRODUCTHUNT_GRAPHQL_URL = "https://api.producthunt.com/v2/api/graphql"
 def signal_source_catalog() -> List[Dict[str, str]]:
     """Return built-in signal source metadata for API/UI display."""
     sources = [
-        {"id": key, "name": name, "kind": "signal"}
-        for key, (name, _) in GITHUB_VARIANTS.items()
+        {"id": key, "name": name, "xmlUrl": url, "kind": "signal", "category": "developer_open_source"}
+        for key, (name, url) in GITHUB_VARIANTS.items()
     ]
+    media_categories = {"36kr": "business_investment", "sspai": "product_startup", "oschina": "developer_open_source"}
     sources.extend(
-        {"id": key, "name": name, "kind": "signal"}
-        for key, (name, _) in RSS_FEEDS.items()
+        {"id": key, "name": name, "xmlUrl": url, "kind": "signal", "category": media_categories[key]}
+        for key, (name, url) in RSS_FEEDS.items()
     )
+    jike_categories = {"jike-ai-explore": "ai", "jike-ai-discuss": "ai", "jike-engineer": "developer_open_source"}
     sources.extend(
-        {"id": key, "name": name, "kind": "signal"}
-        for key, (name, _) in JIKE_TOPICS.items()
+        {
+            "id": key,
+            "name": name,
+            "xmlUrl": f"https://jike.app/topic/{topic_id}",
+            "kind": "signal",
+            "category": jike_categories[key],
+        }
+        for key, (name, topic_id) in JIKE_TOPICS.items()
     )
-    sources.append({"id": "v2ex", "name": "V2EX", "kind": "signal"})
+    sources.append({"id": "v2ex", "name": "V2EX", "xmlUrl": "https://www.v2ex.com", "kind": "signal", "category": "developer_open_source"})
     sources.extend(
-        {"id": key, "name": name, "kind": "signal"}
-        for key, (name, _) in APPSTORE_REGIONS.items()
+        {
+            "id": key,
+            "name": name,
+            "xmlUrl": f"https://itunes.apple.com/{code}/rss/newapplications",
+            "kind": "signal",
+            "category": "product_startup",
+        }
+        for key, (name, code) in APPSTORE_REGIONS.items()
     )
     sources.extend(
         [
-            {"id": "producthunt", "name": "Product Hunt", "kind": "signal"},
-            {"id": "reddit", "name": "Reddit", "kind": "signal"},
+            {"id": "producthunt", "name": "Product Hunt", "xmlUrl": "https://www.producthunt.com", "kind": "signal", "category": "product_startup"},
+            {"id": "reddit", "name": "Reddit", "xmlUrl": "https://www.reddit.com/r/SideProject", "kind": "signal", "category": "product_startup"},
         ]
     )
+    sources.extend(google_news_source_catalog())
     return sources
 
 

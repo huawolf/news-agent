@@ -96,6 +96,7 @@ def _parse_feed_entries(content, feed_info: Dict, cutoff_time: datetime) -> List
                 "source": feed_info["title"],
                 "content": _extract_body(entry),
                 "tags": [],
+                "category": feed_info.get("category", "other"),
                 "score": 0,
                 "summary": "",
             }
@@ -331,4 +332,3 @@ async def fetch_hackernews_entries(
         })
 
     return entries
-

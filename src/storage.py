@@ -537,6 +537,63 @@ def load_trending_history(path: str) -> TrendingHistory:
 
 
 _SECTION_ORDER = ("rss", "github", "hackernews", "insights")
+_ITEM_HEADING_RE = re.compile(r"(?m)^###\s+(.+?)\s*$")
+
+
+def _delivery_items(raw: str, max_items: int, start_number: int = 1) -> List[str]:
+    """Extract and normalize numbered items from one generated section."""
+    if not raw or max_items <= 0:
+        return []
+
+    metadata, body = parse_frontmatter(raw.strip())
+    clean = body if metadata else raw.strip()
+    matches = list(_ITEM_HEADING_RE.finditer(clean))
+    items: List[str] = []
+    for index, match in enumerate(matches):
+        if len(items) >= max_items:
+            break
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
+        title = re.sub(
+            r"^(?:\d+[.)、]\s*|\d+\ufe0f?\u20e3\s*)", "", match.group(1)
+        ).strip()
+        content = clean[match.end():end].strip()
+        if not title or not content:
+            continue
+        number = start_number + len(items)
+        items.append(f"### {number}. {title}\n{content}")
+    return items
+
+
+def limit_delivery_items(
+    sections: Dict[str, str], max_items: int, github_max_items: int = 3
+) -> Dict[str, str]:
+    """Build one capped news list and one independently capped GitHub list.
+
+    RSS and Hacker News share ``max_items`` and continuous numbering. GitHub is
+    capped by ``github_max_items`` and starts its own numbering at 1.
+    """
+    news_limit = max(1, int(max_items))
+    github_limit = max(1, int(github_max_items))
+    limited: Dict[str, str] = {}
+
+    headlines = _delivery_items(sections.get("rss") or "", news_limit)
+    remaining = news_limit - len(headlines)
+    if remaining > 0:
+        headlines.extend(
+            _delivery_items(
+                sections.get("hackernews") or "",
+                remaining,
+                start_number=len(headlines) + 1,
+            )
+        )
+    if headlines:
+        limited["rss"] = "\n\n".join(headlines)
+
+    github = _delivery_items(sections.get("github") or "", github_limit)
+    if github:
+        limited["github"] = "\n\n".join(github)
+
+    return limited
 
 
 def assemble_with_sentinels(sections: Dict[str, str]) -> str:

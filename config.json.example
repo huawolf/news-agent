@@ -9,12 +9,12 @@
         "no_content_marker": "[NO_NEW_CONTENT]"
     },
     "log": {
-        "retention_days": 7
+        "retention_days": 30
     },
     "schedule": {
         "fetch_interval_minutes": 60,
         "fetch_lookback_minutes": 1440,
-        "push_cron": ["0 8 * * *", "0 17 * * *"],
+        "push_cron": ["0 10 * * *", "0 20 * * *"],
         "timezone_hours": 8
     },
     "personal_preferences": "Prioritize practical AI agent, LLM inference, and developer tooling news. Prefer primary sources and concise technical coverage.",
@@ -23,14 +23,14 @@
         "schedules": [
             {
                 "id": "morning",
-                "cron": "0 8 * * *",
-                "max_items": 8,
+                "cron": "0 10 * * *",
+                "max_items": 10,
                 "sections": ["rss", "github", "hackernews", "insights"]
             },
             {
                 "id": "evening",
-                "cron": "0 17 * * *",
-                "max_items": 5,
+                "cron": "0 20 * * *",
+                "max_items": 10,
                 "sections": ["rss"]
             }
         ],
@@ -61,6 +61,21 @@
             "request_timeout": 10,
             "algolia_base": "https://hn.algolia.com/api/v1",
             "jinaTokenName": "JINA_API_KEY"
+        },
+        "google_news": {
+            "enabled": true,
+            "regions": [
+                "cn",
+                "us"
+            ],
+            "topics": [
+                "business",
+                "technology",
+                "science"
+            ],
+            "max_items_per_feed": 20,
+            "max_lookback_hours": 24,
+            "request_timeout": 10
         },
         "signals": {
             "enabled": true,
@@ -134,22 +149,22 @@
             {
                 "title": "OpenAI News",
                 "xmlUrl": "https://openai.com/news/rss.xml",
-                "category": "AI"
+                "category": "ai"
             },
             {
                 "title": "Chrome for Developers",
                 "xmlUrl": "https://developer.chrome.com/static/blog/feed.xml",
-                "category": "Chrome"
+                "category": "developer_open_source"
             },
             {
                 "title": "Cloudflare Developers",
                 "xmlUrl": "https://developers.cloudflare.com/changelog/rss/index.xml",
-                "category": "Cloudflare"
+                "category": "developer_open_source"
             },
             {
                 "title": "Infoq",
                 "xmlUrl": "https://feed.infoq.com/",
-                "category": "News"
+                "category": "other"
             }
         ],
         "block": [

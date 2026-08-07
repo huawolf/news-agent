@@ -47,7 +47,7 @@ async def run_hackernews_section(
     print(f"🤖 HN: 轻 LLM 初筛 (k={select_k})...")
     selected_ids, select_err = await select_ai_related_hn(front, k=select_k, config=config["llm"])
     if select_err:
-        return "", f"select_ai_related_hn: {select_err}"
+        return "", select_err
     if not selected_ids:
         print("ℹ️ HN: 初筛未挑出 AI 相关内容,跳过")
         return "", None
@@ -86,6 +86,6 @@ async def run_hackernews_section(
     print(f"🤖 HN: summarize {len(enriched)} 个 enriched story...")
     md, err = await summarize_hackernews(enriched, config["llm"])
     if err:
-        return "", f"summarize_hackernews: {err}"
+        return "", err
     print(f"✅ HN: 板块输出 {len(md or '')} chars")
     return md or "", None

@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from croniter import croniter
 from src.config import get_timezone, load_config, merge_sources
 from src.fetcher import fetch_all_feeds
 from src.llm import (
+    LLMOperationError,
     check_llm_available,
     generate_immediate_push,
     parse_immediate_push_with_metadata,
@@ -32,6 +34,7 @@ from src.sections.hackernews.section import run_hackernews_section
 from src.sections.insights.section import run_insights_section
 from src.sections.rss.section import run_rss_section
 from src.sections.signals.collector import fetch_signal_entries
+from src.sections.signals.google_news import fetch_google_news_entries
 from src.storage import (
     append_entries,
     assemble_with_sentinels,
@@ -40,6 +43,7 @@ from src.storage import (
     get_notify_file,
     get_push_file,
     load_existing_links,
+    limit_delivery_items,
     load_recent_notify_content,
     load_recent_push_content,
     read_entries,
@@ -53,8 +57,13 @@ from src.storage import (
 
 
 async def notify_llm_errors(stage: str, errors: List[str], config: Dict):
-    """Send a simple LLM error notification."""
-    if not errors:
+    """Notify only when an LLM operation failed due to connectivity."""
+    connection_errors = [
+        error
+        for error in errors
+        if isinstance(error, LLMOperationError) and error.connection_failure
+    ]
+    if not connection_errors:
         return
 
     lines = [
@@ -64,7 +73,7 @@ async def notify_llm_errors(stage: str, errors: List[str], config: Dict):
         f"time: {now_local(config).strftime('%Y-%m-%d %H:%M:%S')}",
         "",
     ]
-    lines.extend(f"- {error}" for error in errors)
+    lines.extend(f"- {error}" for error in connection_errors)
 
     try:
         await send_to_platforms("\n".join(lines), config["push"])
@@ -83,6 +92,26 @@ def _is_english_output(config: Dict) -> bool:
 
 def _daily_title_prefix(config: Dict) -> str:
     return "📰 News Agent Daily Brief | " if _is_english_output(config) else "📰 News Agent 每日精选 | "
+
+
+def _delivery_title(config: Dict, title: str) -> str:
+    """Build a daily title without mixing Chinese and English fixed copy."""
+    clean_title = str(title or "").strip()
+    prefixes = (
+        "📰 News Agent Daily Brief | ",
+        "📰 News Agent 每日精选 | ",
+        "News Agent Daily Brief | ",
+        "News Agent 每日精选 | ",
+    )
+    for prefix in prefixes:
+        if clean_title.startswith(prefix):
+            clean_title = clean_title[len(prefix):].strip()
+            break
+
+    if not clean_title:
+        clean_title = now_local(config).strftime("%Y-%m-%d")
+    prefix_config = {"output_language": "zh" if re.search(r"[\u3400-\u9fff]", clean_title) else "en"}
+    return _daily_title_prefix(prefix_config) + clean_title
 
 
 def _default_digest_title(config: Dict, date_str: str) -> str:
@@ -265,9 +294,8 @@ def collect_entries_for_push(
     2. Filter by min_score.
     3. Load sent-history.json.
     4. Filter links that have already been sent.
-    5. push_time = max(last_push_time, now - 24h)
-    6. Entries after push_time become delivery candidates.
-    7. Earlier entries become LLM deduplication context.
+    5. Unsent entries from the last 24 hours become delivery candidates.
+    6. Earlier entries become LLM deduplication context.
     """
     tz = get_timezone()
     now = datetime.now(tz)
@@ -293,13 +321,15 @@ def collect_entries_for_push(
     sent_links = load_sent_links(days=3, data_dir=data_dir)
     print(f"📋 Sent history loaded: {len(sent_links)} filtered links")
 
-    # Calculate delivery cutoff: max(last_push_time, now - 24h).
+    # Keep unsent candidates eligible for 24 hours. Sent history, rather than the
+    # previous push timestamp, is the authority for whether an item was delivered.
     past_24h = now - timedelta(hours=24)
-    push_cutoff = (
-        last_push_time if last_push_time and last_push_time > past_24h else past_24h
-    )
+    push_cutoff = past_24h
 
-    print(f"Delivery cutoff: {push_cutoff.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"Delivery eligibility cutoff: {push_cutoff.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"| last push: {last_push_time or 'none'}"
+    )
 
     # Split entries.
     to_push = []
@@ -307,24 +337,54 @@ def collect_entries_for_push(
     # Context is only for LLM deduplication/history reference; omit large fields.
     CONTEXT_FIELDS = ("title", "source", "score", "summary", "tags", "published")
 
+    sent_filtered = 0
+    cutoff_filtered = 0
     for entry in qualified_entries:
         link = entry.get("link")
         if link and link in sent_links:
+            sent_filtered += 1
             continue
 
         entry_time = parse_time_to_local(entry.get("fetched_at", ""))
         if entry_time and entry_time > push_cutoff:
             to_push.append(entry)
         else:
+            cutoff_filtered += 1
             context.append({k: entry.get(k) for k in CONTEXT_FIELDS})
+
+    print(
+        f"📊 Delivery filters: qualified={len(qualified_entries)}, "
+        f"sent={sent_filtered}, cutoff={cutoff_filtered}, fresh={len(to_push)}"
+    )
 
     # Sort context by score and keep the top 50.
     context = sorted(context, key=lambda x: x.get("score", 0), reverse=True)[:50]
 
+    fresh_count = len(to_push)
     to_push = rank_entries_for_delivery(to_push, preferences or {})
+    print(
+        f"📊 Delivery diversity: input={fresh_count}, kept={len(to_push)}, "
+        f"removed={fresh_count - len(to_push)}"
+    )
     if max_items is not None:
+        before_limit = len(to_push)
         to_push = to_push[:max(1, max_items)]
+        print(
+            f"📊 Delivery candidate limit: input={before_limit}, "
+            f"kept={len(to_push)}, max_items={max_items}"
+        )
     return to_push, context
+
+
+def links_present_in_content(entries: List[Dict], content: str) -> List[str]:
+    """Return candidate links that are actually present in delivered content."""
+    if not content:
+        return []
+    return [
+        link
+        for entry in entries
+        if (link := entry.get("link")) and link in content
+    ]
 
 
 def rank_entries_for_delivery(entries: List[Dict], preferences: Dict) -> List[Dict]:
@@ -398,8 +458,7 @@ async def run_fetch_job(config: Dict):
     print(f"📂 Sources configured: {len(sources)}")
 
     if not sources:
-        print("⚠️ No available sources")
-        return
+        print("ℹ️ No configured RSS sources; continuing with built-in sources")
 
     max_workers = config.get("fetch", {}).get("max_workers", 20)
     timeout = config.get("fetch", {}).get("timeout", 30)
@@ -418,7 +477,15 @@ async def run_fetch_job(config: Dict):
     except Exception as e:
         print(f"⚠️ Signals fetch failed: {e}")
 
-    # 3. Fetch Hacker News concurrently using Algolia comment data.
+    # 3. Fetch incremental Google News topic feeds using per-feed cursors.
+    google_news_entries = []
+    try:
+        google_news_entries = await fetch_google_news_entries(config)
+        print(f"📥 Google News: fetched {len(google_news_entries)} topic entries")
+    except Exception as e:
+        print(f"⚠️ Google News fetch failed: {e}")
+
+    # 4. Fetch Hacker News concurrently using Algolia comment data.
     hn_entries = []
     try:
         from src.fetcher import fetch_hackernews_entries
@@ -428,7 +495,7 @@ async def run_fetch_job(config: Dict):
         print(f"⚠️ HN fetch failed: {e}")
 
     # Merge sources.
-    raw_all_entries = entries + signal_entries + hn_entries
+    raw_all_entries = entries + signal_entries + google_news_entries + hn_entries
 
     # Second validation: discard entries published before the configured cutoff.
     all_entries = []
@@ -577,9 +644,12 @@ async def run_fetch_job(config: Dict):
             print(f"💾 Saved immediate delivery to {notify_file}")
 
             # 4. Record sent links in sent-history.json.
-            sent_links = [e.get("link") for e in hot_entries if e.get("link")]
+            sent_links = links_present_in_content(hot_entries, content_without_title)
             mark_links_as_sent(sent_links, data_dir=config.get("storage", {}).get("data_dir", "news-data"))
-            print(f"💾 Recorded {len(sent_links)} immediate-delivery links in sent history")
+            print(
+                f"💾 Recorded {len(sent_links)} actually delivered immediate links "
+                f"({len(hot_entries) - len(sent_links)} candidates not marked)"
+            )
 
     print(f"✅ Fetch job completed | new entries: {len(scored)} | hot entries: {len(hot_entries)}")
 
@@ -626,10 +696,18 @@ async def _run_default_push(config: Dict):
         }
     metadata.setdefault("pushTime", now.isoformat())
 
+    delivery_sections = limit_delivery_items(
+        {"rss": rss_md}, policy.get("max_items", 10)
+    )
+    delivery_md = delivery_sections.get("rss", "")
+    if not delivery_md:
+        print("ℹ️ RSS output contains no valid news items; skipping delivery")
+        return
+
     await send_to_platforms(
-        rss_md,
+        delivery_md,
         config["push"],
-        title=_daily_title_prefix(config) + metadata["title"],
+        title=_delivery_title(config, metadata["title"]),
         metadata=metadata,
     )
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
@@ -637,10 +715,10 @@ async def _run_default_push(config: Dict):
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
     push_file = get_push_file(data_dir=data_dir)
-    rss_count = rss_md.count("###")
+    rss_count = delivery_md.count("###")
     save_push_file(
         push_file,
-        rss_md,
+        delivery_md,
         rss_count,
         rss_count,
         profile="default",
@@ -659,11 +737,11 @@ async def _run_default_push(config: Dict):
             min_score=min_score,
             data_dir=data_dir,
             preferences=config.get("preferences"),
-            max_items=policy.get("max_items"),
+            max_items=None,
         )
-        sent_links = [e.get("link") for e in to_push if e.get("link")]
+        sent_links = links_present_in_content(to_push, delivery_md)
         mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 Recorded {len(sent_links)} digest links in sent history")
+        print(f"💾 Recorded {len(sent_links)} actually delivered digest links")
     except Exception as e:
         print(f"⚠️ Failed to record sent history: {e}")
 
@@ -672,44 +750,38 @@ async def _run_default_push(config: Dict):
 
 
 async def _run_morning_push(config: Dict):
-    """Run the morning four-section workflow.
+    """Run the morning news, GitHub, and metadata workflow.
 
-    RSS/GitHub/Hacker News run concurrently, insights runs after them, then
-    sections are assembled with sentinels, delivered, and saved.
+    RSS (which already includes Hacker News entries) and GitHub run concurrently.
+    Insights then generates delivery metadata before the sections are assembled.
 
     Failure semantics:
     - RSS failure raises RuntimeError because it is the core section.
-    - GitHub/Hacker News/insights failures omit that section and continue.
+    - GitHub/insights failures omit that section and continue.
     """
     now = now_local(config)
 
     policy = active_delivery_schedule(config, now)
-    rss_result, gh_result, hn_result = await asyncio.gather(
+    rss_result, gh_result = await asyncio.gather(
         run_rss_section(config, now, max_items=policy.get("max_items")),
         run_github_section(config, now),
-        run_hackernews_section(config, now),
     )
 
     # In morning briefs, insights usually overrides digest metadata.
     # Keep digest metadata as fallback if insights fails.
     rss_md, digest_meta, rss_err = rss_result
     gh_md, gh_err = gh_result
-    hn_md, hn_err = hn_result
 
     if gh_err:
         print(f"⚠️ [section_github] {gh_err}")
         await notify_llm_errors("section_github", [gh_err], config)
-    if hn_err:
-        print(f"⚠️ [section_hackernews] {hn_err}")
-        await notify_llm_errors("section_hackernews", [hn_err], config)
-
     if rss_err and not rss_md:
         print(f"⚠️ [compose_digest] {rss_err}")
         await notify_llm_errors("compose_digest", [rss_err], config)
         raise RuntimeError(f"RSS section failed: {rss_err}")
 
-    insights_md, metadata, insights_err = await run_insights_section(
-        rss_md, gh_md, hn_md, config, now
+    _insights_md, metadata, insights_err = await run_insights_section(
+        rss_md, gh_md, "", config, now
     )
     if insights_err:
         print(f"⚠️ [insights] {insights_err}")
@@ -736,14 +808,17 @@ async def _run_morning_push(config: Dict):
     else:
         metadata.setdefault("pushTime", now.isoformat())
 
-    final = assemble_with_sentinels(
+    delivery_sections = limit_delivery_items(
         {
             "rss": rss_md,
             "github": gh_md,
-            "hackernews": hn_md,
-            "insights": insights_md,
-        }
+        },
+        policy.get("max_items", 10),
+        github_max_items=config.get("sections", {})
+        .get("github_trending", {})
+        .get("max_items", 3),
     )
+    final = assemble_with_sentinels(delivery_sections)
 
     if not final.strip():
         print("ℹ️ Morning brief has no section output; skipping delivery")
@@ -752,7 +827,7 @@ async def _run_morning_push(config: Dict):
     await send_to_platforms(
         final,
         config["push"],
-        title=_daily_title_prefix(config) + metadata["title"],
+        title=_delivery_title(config, metadata["title"]),
         metadata=metadata,
     )
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
@@ -760,9 +835,10 @@ async def _run_morning_push(config: Dict):
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
     push_file = get_push_file(data_dir=data_dir)
-    rss_count = rss_md.count("###") if rss_md else 0
+    rss_count = delivery_sections.get("rss", "").count("###")
+    delivered_count = sum(body.count("###") for body in delivery_sections.values())
     save_push_file(
-        push_file, final, rss_count, rss_count, profile="morning", metadata=metadata
+        push_file, final, rss_count, delivered_count, profile="morning", metadata=metadata
     )
     print(f"💾 Saved morning brief to {push_file}")
     
@@ -777,11 +853,11 @@ async def _run_morning_push(config: Dict):
             min_score=min_score,
             data_dir=data_dir,
             preferences=config.get("preferences"),
-            max_items=policy.get("max_items"),
+            max_items=None,
         )
-        sent_links = [e.get("link") for e in to_push if e.get("link")]
+        sent_links = links_present_in_content(to_push, final)
         mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 Recorded {len(sent_links)} morning-brief links in sent history")
+        print(f"💾 Recorded {len(sent_links)} actually delivered morning-brief links")
     except Exception as e:
         print(f"⚠️ Failed to record sent history: {e}")
 

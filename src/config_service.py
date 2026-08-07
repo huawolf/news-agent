@@ -21,6 +21,23 @@ from dotenv import dotenv_values
 
 from src.runtime import PROJECT_ROOT, default_config_path, ensure_runtime_dirs
 from src.config import merge_sources
+from src.source_categories import normalize_source_category
+
+
+DEFAULT_DELIVERY_SCHEDULES = (
+    {
+        "id": "morning",
+        "cron": "0 10 * * *",
+        "max_items": 10,
+        "sections": ["rss", "github", "hackernews", "insights"],
+    },
+    {
+        "id": "evening",
+        "cron": "0 20 * * *",
+        "max_items": 10,
+        "sections": ["rss"],
+    },
+)
 
 
 class ConfigError(ValueError):
@@ -88,7 +105,7 @@ class ConfigService:
             "delivery": {"timezone": "Asia/Shanghai", "schedules": [],
                          "immediate": {"enabled": True, "threshold": 90, "daily_limit": 3}},
             "storage": {"data_dir": str(self.paths["news_data"])},
-            "log": {"retention_days": 7},
+            "log": {"retention_days": 30},
         }
 
     def _bootstrap(self) -> None:
@@ -107,8 +124,21 @@ class ConfigService:
         except json.JSONDecodeError as exc:
             raise ConfigError(f"invalid JSON in {self.config_path}: {exc}") from exc
         has_personal_preferences = bool(str(raw.get("personal_preferences", "")).strip())
+        has_delivery_schedules = (
+            isinstance(raw.get("delivery"), dict)
+            and "schedules" in raw["delivery"]
+        )
+        has_legacy_push_cron = (
+            isinstance(raw.get("schedule"), dict)
+            and "push_cron" in raw["schedule"]
+        )
         config = _deep_merge(self._defaults(), raw)
-        self._migrate_legacy(config, has_personal_preferences)
+        self._migrate_legacy(
+            config,
+            has_personal_preferences,
+            has_delivery_schedules=has_delivery_schedules,
+            has_legacy_push_cron=has_legacy_push_cron,
+        )
         self.validate(config)
         config.setdefault("llm", {})["output_language"] = config["output_language"]
         config["llm"]["personal_preferences"] = config["personal_preferences"]
@@ -118,16 +148,25 @@ class ConfigService:
             self._write(config)
         return config
 
-    def _migrate_legacy(self, config: dict, has_personal_preferences: bool) -> None:
+    def _migrate_legacy(
+        self,
+        config: dict,
+        has_personal_preferences: bool,
+        *,
+        has_delivery_schedules: bool,
+        has_legacy_push_cron: bool,
+    ) -> None:
         delivery = config["delivery"]
-        if not delivery.get("schedules"):
+        if not has_delivery_schedules and has_legacy_push_cron:
             old = config.get("schedule", {}).get("push_cron", [])
             delivery["schedules"] = [
                 {"id": "morning" if index == 0 else f"push-{index + 1}", "cron": cron,
-                 "max_items": 8 if index == 0 else 5,
+                 "max_items": 10,
                  "sections": ["rss", "github", "hackernews", "insights"] if index == 0 else ["rss"]}
                 for index, cron in enumerate(old)
             ]
+        elif not has_delivery_schedules and not has_legacy_push_cron:
+            delivery["schedules"] = copy.deepcopy(list(DEFAULT_DELIVERY_SCHEDULES))
         config["preferences"].setdefault("interests", [])
         config["preferences"].setdefault("avoid", [])
         if not has_personal_preferences:
@@ -231,13 +270,18 @@ class ConfigService:
 
     async def add_source(self, source: dict, actor: str = "api") -> tuple[dict, int]:
         self.validate_source(source)
+        category = normalize_source_category(
+            source.get("category"),
+            title=source.get("title", ""),
+            url=source.get("xmlUrl", ""),
+        )
         async with self._transaction_lock():
             current = self.load()
             items = current["sources"].setdefault("add", [])
             if any(item.get("xmlUrl") == source["xmlUrl"] for item in items):
                 raise ConfigError("RSS source already exists")
             items.append({"title": source["title"].strip(), "xmlUrl": source["xmlUrl"].strip(),
-                          "category": source.get("category", "Custom")})
+                          "category": category})
             self.validate(current)
             self._write(current)
             self._revision += 1
@@ -249,9 +293,14 @@ class ConfigService:
             current = self.load()
             items = current["sources"].setdefault("add", [])
             source = next((item for item in items if _source_id(item.get("xmlUrl", "")) == source_id), None)
-            if source is None:
-                raise ConfigError("custom RSS source not found")
-            source.update({key: value for key, value in patch.items() if key in {"title", "xmlUrl", "category"}})
+            clean_patch = {key: value for key, value in patch.items() if key in {"title", "xmlUrl", "category"}}
+            if "category" in clean_patch:
+                clean_patch["category"] = normalize_source_category(
+                    clean_patch["category"],
+                    title=clean_patch.get("title", source.get("title", "")),
+                    url=clean_patch.get("xmlUrl", source.get("xmlUrl", "")),
+                )
+            source.update(clean_patch)
             self.validate(current)
             self._write(current)
             self._revision += 1
@@ -265,11 +314,19 @@ class ConfigService:
             remaining = [item for item in items if _source_id(item.get("xmlUrl", "")) != source_id]
             if len(remaining) == len(items):
                 active = next((item for item in self.sources(current) if item["id"] == source_id), None)
-                if active is None:
-                    raise ConfigError("RSS source not found")
-                blocks = current["sources"].setdefault("block", [])
-                if not any(item.get("xmlUrl") == active["xmlUrl"] for item in blocks):
-                    blocks.append({"title": active["title"], "xmlUrl": active["xmlUrl"]})
+                if active is not None:
+                    blocks = current["sources"].setdefault("block", [])
+                    if not any(item.get("xmlUrl") == active["xmlUrl"] for item in blocks):
+                        blocks.append({"title": active["title"], "xmlUrl": active["xmlUrl"]})
+                elif source_id in {"github_trending", "hackernews"}:
+                    current.setdefault("sections", {}).setdefault(source_id, {})["enabled"] = False
+                else:
+                    from src.sections.signals.collector import signal_source_catalog
+                    sig = next((s for s in signal_source_catalog() if s["id"] == source_id), None)
+                    if sig is not None:
+                        current.setdefault("sections", {}).setdefault("signals", {}).setdefault("sources", {})[source_id] = False
+                    else:
+                        raise ConfigError("RSS or signal source not found")
             else:
                 current["sources"]["add"] = remaining
             self._write(current)

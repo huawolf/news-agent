@@ -15,7 +15,7 @@ def current_log_dir(log_root: Path) -> Path:
     return path
 
 
-def cleanup_log_dirs(log_root: Path, retention_days: int = 7) -> None:
+def cleanup_log_dirs(log_root: Path, retention_days: int = 30) -> None:
     if retention_days <= 0 or not log_root.exists():
         return
     cutoff = (datetime.now() - timedelta(days=retention_days - 1)).strftime("%Y%m%d")
@@ -24,7 +24,7 @@ def cleanup_log_dirs(log_root: Path, retention_days: int = 7) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
-def configure_logging(log_dir: Path, retention_days: int = 7) -> logging.Logger:
+def configure_logging(log_dir: Path, retention_days: int = 30) -> logging.Logger:
     logger = logging.getLogger("news_agent")
     logger.setLevel(logging.INFO)
     logger.propagate = False

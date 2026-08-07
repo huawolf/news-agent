@@ -3,7 +3,20 @@
 param()
 
 $ErrorActionPreference = "Stop"
-$ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ((Test-Path "pyproject.toml") -and (Test-Path "src")) {
+    $ProjectDir = (Get-Location).Path
+} elseif ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\pyproject.toml"))) {
+    $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+} else {
+    $ProjectDir = Join-Path $env:USERPROFILE ".news-agent"
+    Write-Host "Cloning news-agent into $ProjectDir..."
+    if (Test-Path $ProjectDir) {
+        Set-Location $ProjectDir
+        git pull --rebase
+    } else {
+        git clone https://github.com/huawolf/news-agent.git $ProjectDir
+    }
+}
 Set-Location $ProjectDir
 
 function Get-UvCommand {

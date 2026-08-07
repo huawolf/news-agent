@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Dict, List
 from urllib.parse import urlparse
 
+from src.source_categories import normalize_source_category
+
 
 def _get_local_timezone() -> timezone:
     """自动检测本地时区"""
@@ -48,6 +50,10 @@ def load_config(config_path: str = "config.json") -> Dict:
         config = json.load(f)
 
     config["personal_preferences"] = str(config.get("personal_preferences", "")).strip()
+    config.setdefault("llm", {})["output_language"] = config.get(
+        "output_language", "en"
+    )
+    config["llm"]["personal_preferences"] = config["personal_preferences"]
 
     return config
 
@@ -64,10 +70,14 @@ def parse_opml(opml_path: str) -> List[Dict]:
 
     feeds = []
     for outline in root.findall(".//outline[@type='rss']"):
+        title = outline.get("title", "")
+        url = outline.get("xmlUrl", "")
         feeds.append({
-            "title": outline.get("title", ""),
-            "xmlUrl": outline.get("xmlUrl", ""),
-            "category": outline.get("category", "未分类"),
+            "title": title,
+            "xmlUrl": url,
+            "category": normalize_source_category(
+                outline.get("category"), title=title, url=url
+            ),
         })
 
     return feeds
@@ -115,6 +125,10 @@ def merge_sources(sources_config: Dict) -> List[Dict]:
         url = s.get("xmlUrl", "")
         if url and url not in seen:
             seen.add(url)
-            result.append(s)
+            item = dict(s)
+            item["category"] = normalize_source_category(
+                item.get("category"), title=item.get("title", ""), url=url
+            )
+            result.append(item)
 
     return result

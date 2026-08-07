@@ -93,6 +93,6 @@ async def run_github_section(
     print(f"🤖 GH: summarize {len(enriched)} 个候选...")
     md, err = await summarize_github_trending(enriched, config["llm"])
     if err:
-        return "", f"summarize_github_trending: {err}"
+        return "", err
     print(f"✅ GH: 板块输出 {len(md or '')} chars")
     return md or "", None

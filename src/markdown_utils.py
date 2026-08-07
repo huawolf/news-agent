@@ -90,7 +90,7 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
                 else:
                     body_lines.append(line)
             
-            if yaml_lines and body_lines:
+            if yaml_lines:
                 # 统一替换中文冒号为英文冒号+空格，并确保所有 YAML 键的冒号后有空格
                 yaml_content = "\n".join(yaml_lines).replace("：", ": ")
                 yaml_content = re.sub(r"^(\s*\w+):([^\s])", r"\1: \2", yaml_content, flags=re.MULTILINE)
@@ -100,6 +100,22 @@ def parse_frontmatter(text: str) -> Tuple[Dict, str]:
                 yaml_content = re.sub(
                     r"^(\s*)[•·*]\s+", r"\1- ", yaml_content, flags=re.MULTILINE
                 )
+                normalized_lines = []
+                in_highlights = False
+                for yaml_line in yaml_content.splitlines():
+                    stripped_yaml_line = yaml_line.strip()
+                    key_match = re.match(r"^[A-Za-z_][\w-]*\s*:", stripped_yaml_line)
+                    if key_match:
+                        in_highlights = key_match.group(0).split(":", 1)[0] == "highlights"
+                    elif (
+                        in_highlights
+                        and stripped_yaml_line
+                        and not stripped_yaml_line.startswith("-")
+                        and stripped_yaml_line[:1] in {'"', "'"}
+                    ):
+                        yaml_line = f"  - {stripped_yaml_line}"
+                    normalized_lines.append(yaml_line)
+                yaml_content = "\n".join(normalized_lines)
                 try:
                     meta = yaml.safe_load(yaml_content) or {}
                     if isinstance(meta, dict) and any(k in meta for k in ("title", "lead", "highlights")):

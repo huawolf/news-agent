@@ -2,7 +2,20 @@
 # One-command installer for macOS and Linux.
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "pyproject.toml" && -d "src" ]]; then
+    PROJECT_DIR="$(pwd)"
+elif [[ -n "${BASH_SOURCE[0]:-}" && -f "$(dirname "${BASH_SOURCE[0]}")/../pyproject.toml" ]]; then
+    PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+    PROJECT_DIR="${HOME}/.news-agent"
+    echo "Cloning news-agent into ${PROJECT_DIR}..."
+    if [[ -d "$PROJECT_DIR" ]]; then
+        cd "$PROJECT_DIR"
+        git pull --rebase || true
+    else
+        git clone https://github.com/huawolf/news-agent.git "$PROJECT_DIR"
+    fi
+fi
 cd "$PROJECT_DIR"
 
 ensure_uv() {

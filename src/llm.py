@@ -14,6 +14,43 @@ from src.markdown_utils import normalize_str_list, parse_frontmatter
 logger = logging.getLogger("news_agent.llm")
 
 
+class LLMOperationError(str):
+    """LLM failure message carrying whether push notification is warranted."""
+
+    def __new__(cls, message: str, *, connection_failure: bool = False):
+        value = super().__new__(cls, message)
+        value.connection_failure = connection_failure
+        return value
+
+
+def _is_llm_connection_error(error: BaseException) -> bool:
+    """Return whether an exception chain represents an LLM connection failure."""
+    import aiohttp
+
+    connection_errors = (
+        aiohttp.ClientConnectionError,
+        asyncio.TimeoutError,
+        ConnectionError,
+        TimeoutError,
+    )
+    current: Optional[BaseException] = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, connection_errors):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _llm_error_message(prefix: str, error: BaseException) -> LLMOperationError:
+    detail = str(error) or error.__class__.__name__
+    return LLMOperationError(
+        f"{prefix}: {detail}",
+        connection_failure=_is_llm_connection_error(error),
+    )
+
+
 def load_prompt(prompt_path: str, **kwargs) -> str:
     """加载提示词模板并填充变量"""
     path = Path(prompt_path)
@@ -314,7 +351,6 @@ def _reconcile_batch_results(
             if link in entry_links:
                 matched_results.append(item)
 
-    errors = []
     if len(results) != len(entries) or len(matched_results) != len(entries):
         missing_links = sorted(entry_links - result_links)
         error_message = (
@@ -329,9 +365,9 @@ def _reconcile_batch_results(
             missing=missing_links,
         )
         print(f"⚠️ {error_message}")
-        errors.append(error_message)
 
-    return matched_results, errors
+    # Reconciliation gaps are recorded locally but do not warrant a push alert.
+    return matched_results, []
 
 
 async def _score_single_batch(
@@ -361,8 +397,7 @@ async def _score_single_batch(
         return _reconcile_batch_results(entries, results, batch_index)
 
     except Exception as e:
-        detail = str(e) or e.__class__.__name__
-        error_message = f"批次{batch_index + 1} 评分失败: {detail}"
+        error_message = _llm_error_message(f"批次{batch_index + 1} 评分失败", e)
         logger.exception(
             "LLM scoring batch failed batch=%s entries=%s error_type=%s",
             batch_index + 1,
@@ -370,7 +405,8 @@ async def _score_single_batch(
             e.__class__.__name__,
         )
         print(f"⚠️ {error_message}")
-        return [], [error_message]
+        alert_errors = [error_message] if error_message.connection_failure else []
+        return [], alert_errors
 
 
 async def score_batch(
@@ -486,7 +522,7 @@ async def generate_immediate_push(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        error_message = f"生成即时推送失败: {e}"
+        error_message = _llm_error_message("生成即时推送失败", e)
         print(f"⚠️ {error_message}")
         return "", error_message
 
@@ -496,6 +532,7 @@ async def compose_digest(
     context: List[Dict],
     config: Dict,
     recent_push_context: str = "",
+    max_items: int = 10,
 ) -> str:
     """生成定时汇总推送内容
 
@@ -519,10 +556,27 @@ async def compose_digest(
             f"summary: {c.get('summary', '')}"
         )
 
+    digest_entries = [
+        {
+            "title": entry.get("title", ""),
+            "source": entry.get("source", ""),
+            "link": entry.get("link", ""),
+            "score": entry.get("score", 0),
+            "quality_score": entry.get("quality_score", 0),
+            "interest_score": entry.get("interest_score", 0),
+            "summary": entry.get("summary", ""),
+            "tags": entry.get("tags", []),
+            "published": entry.get("published", ""),
+            "content": str(entry.get("content", ""))[:1500],
+        }
+        for entry in entries
+    ]
+
     prompt = load_prompt(
         prompt_path,
         count=len(entries),
-        entries=json.dumps(entries, ensure_ascii=False, indent=2),
+        max_items=max(1, int(max_items)),
+        entries=json.dumps(digest_entries, ensure_ascii=False, indent=2),
         context="\n\n".join(context_text),
         recent_push_context=recent_push_context,
         date=datetime.now().strftime("%Y-%m-%d"),
@@ -554,7 +608,7 @@ async def summarize_github_trending(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = f"summarize_github_trending 失败: {e}"
+        msg = _llm_error_message("summarize_github_trending 失败", e)
         print(f"⚠️ {msg}")
         return "", msg
 
@@ -587,14 +641,14 @@ async def select_ai_related_hn(
     try:
         response = await call_llm(prompt, config)
     except Exception as e:
-        msg = f"select_ai_related_hn 失败: {e}"
+        msg = _llm_error_message("select_ai_related_hn 失败", e)
         print(f"⚠️ {msg}")
         return [], msg
 
     try:
         ids = _parse_llm_json_response(response)
     except ValueError as e:
-        msg = f"select_ai_related_hn 解析失败: {e}"
+        msg = _llm_error_message("select_ai_related_hn 解析失败", e)
         print(f"⚠️ {msg}")
         return [], msg
 
@@ -618,7 +672,7 @@ async def summarize_hackernews(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = f"summarize_hackernews 失败: {e}"
+        msg = _llm_error_message("summarize_hackernews 失败", e)
         print(f"⚠️ {msg}")
         return "", msg
 
@@ -638,7 +692,7 @@ async def generate_trend_insights(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = f"generate_trend_insights 失败: {e}"
+        msg = _llm_error_message("generate_trend_insights 失败", e)
         print(f"⚠️ {msg}")
         return "", msg
 

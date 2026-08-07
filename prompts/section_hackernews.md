@@ -4,9 +4,7 @@
 
 {output_language_instruction}
 
-固定文案也必须跟随输出语言：
-- 英文输出时，标题使用 `## 🟧 Hacker News Discussions`，字段标签使用 `Content summary`、`Discussion summary`，链接文案使用 `[Original]` 和 `[HN discussion]`，不要输出 `Hacker News 热议`、`内容总结`、`讨论总结`、`原文`、`HN 讨论页`。
-- 中文输出时，使用下方中文模板。
+链接文案也必须跟随输出语言：英文使用 `[Original]` 和 `[HN discussion]`，中文使用 `[原文]` 和 `[HN 讨论页]`。
 
 任务：
 对输入的 enriched stories进行 提炼：
@@ -93,29 +91,14 @@
 
 ## 输出格式（严格 Markdown）
 
+每条只保留标题和一段核心内容，不要输出栏目标题、字段标签、无序列表或分隔线。
+
 ```markdown
-## 🟧 Hacker News 热议
+### 1. {{title}}
 
-### {{title}}
+用 1-3 句话概括原文核心、社区共识或关键争议，并包含 points 和 comments 数据。段末保留 [原文]({{url}}) 与 [HN 讨论页]({{comments_url}})。
 
-{{points}} pts · {{comments}} comments · [site](site url)
-
-**📌 内容总结**
-
-- {{背景/作者意图}}
-- HN 关注点:
-  - 要点 1
-  - 要点 2
-  - 要点 3（可选）
-
-**💬 讨论总结**
-
-- ...
-- ...
-
-🔗 [原文]({{url}}) · [HN 讨论页]({{comments_url}})
-
-### {{title2}}
+### 2. {{title2}}
 
 ...
 
@@ -123,9 +106,8 @@
 
 规则：
 
-* 如果没有明显反对意见，则删除「反对 / 质疑」
 * 每条控制信息密度，不写长段落
-* story 之间空一行
+* story 之间空一行，并按 `### 1.`、`### 2.` 连续编号
 
 ## 输入数据
 

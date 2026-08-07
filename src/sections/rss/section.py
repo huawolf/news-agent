@@ -3,15 +3,55 @@
 迁移自 src/main.py::run_push_job 中 RSS digest 部分,行为保持一致。
 """
 
+import re
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-from src.llm import compose_digest, parse_digest_with_metadata
+from src.llm import _llm_error_message, compose_digest, parse_digest_with_metadata
 from src.storage import (
     extract_push_time,
     get_last_push_file,
     load_recent_push_content,
 )
+
+
+_ITEM_HEADING_RE = re.compile(r"(?m)^###\s+.+?\s*$")
+
+
+def _fill_digest_items(
+    body: str, entries: list[Dict], max_items: int, output_language: str
+) -> str:
+    """Fill an undersized model digest from already ranked and scored entries."""
+    target = max(1, int(max_items))
+    current = len(_ITEM_HEADING_RE.findall(body or ""))
+    if current >= target:
+        return body
+
+    parts = [body.strip()] if body and body.strip() else []
+    represented_links = {
+        entry.get("link")
+        for entry in entries
+        if entry.get("link") and entry.get("link") in (body or "")
+    }
+    link_label = "Read original" if output_language == "en" else "查看原文"
+
+    for entry in entries:
+        if current >= target:
+            break
+        link = str(entry.get("link") or "").strip()
+        title = " ".join(str(entry.get("title") or "").split())
+        summary = " ".join(str(entry.get("summary") or "").split())
+        if not link or link in represented_links or not title or not summary:
+            continue
+        current += 1
+        represented_links.add(link)
+        parts.append(f"### {current}. {title}\n{summary} [{link_label}]({link})")
+
+    if current < target:
+        print(f"⚠️ Digest fill stopped at {current}/{target}: insufficient complete candidates")
+    elif len(parts) > 1:
+        print(f"✅ Digest filled to {current}/{target} items from ranked candidates")
+    return "\n\n".join(parts)
 
 
 async def run_rss_section(
@@ -36,31 +76,50 @@ async def run_rss_section(
     min_score = config["filter"]["min_score"]
     context_days = config["filter"]["context_days"]
 
+    target_items = max(1, int(max_items or 10))
+
     to_push, context = collect_entries_for_push(
         last_push_time=last_push_time,
         context_days=context_days,
         min_score=min_score,
         data_dir=data_dir,
         preferences=config.get("preferences"),
-        max_items=max_items,
+        max_items=None,
     )
 
     if not to_push:
         print("ℹ️ RSS: 无新消息")
         return "", None, None
 
+    candidate_limit = target_items * 3
+    to_push = to_push[:candidate_limit]
+    print(
+        f"📊 Digest candidate pool: kept={len(to_push)}, "
+        f"target={target_items}, multiplier=3"
+    )
+
     push_context_days = config["filter"].get("push_context_days", 5)
     recent = load_recent_push_content(push_context_days, data_dir=data_dir)
 
     try:
         raw = await compose_digest(
-            to_push, context, config["llm"], recent_push_context=recent
+            to_push,
+            context,
+            config["llm"],
+            recent_push_context=recent,
+            max_items=target_items,
         )
     except Exception as e:
-        msg = f"compose_digest 失败: {e}"
+        msg = _llm_error_message("compose_digest 失败", e)
         print(f"⚠️ RSS: {msg}")
         return "", None, msg
 
     date_str = (now or datetime.now()).strftime("%Y-%m-%d")
     body, metadata = parse_digest_with_metadata(raw or "", date_str)
+    body = _fill_digest_items(
+        body,
+        to_push,
+        target_items,
+        config.get("output_language", "zh"),
+    )
     return body, metadata, None

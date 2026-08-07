@@ -27,18 +27,32 @@ The installer scripts for macOS, Linux, and Windows will automatically install `
 
 ## Install
 
-Clone the repository and run the installer from its root directory.
+You can install News Agent using a single terminal command without cloning first:
 
 macOS or Linux:
 
 ```bash
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+iwr -useb https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/install.ps1 | iex
+```
+
+Alternatively, clone the repository and run the installer from its directory:
+
+macOS or Linux:
+
+```bash
+git clone https://github.com/huawolf/news-agent.git && cd news-agent && ./scripts/install.sh
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/huawolf/news-agent.git; cd news-agent; powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
 The installer creates `.env` from `.env.example`, installs the locked runtime dependencies, and registers a per-user login service. Open <http://127.0.0.1:12301> after installation.
@@ -61,7 +75,10 @@ Important settings:
 - `preferences`: interests, exclusions, source weights, language preference, and diversity limits.
 - `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
 - `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
-- `delivery.schedules`: cron schedules, sections, and `max_items` per delivery.
+- `log.retention_days`: number of daily log directories to retain; defaults to 30 days.
+- `delivery.schedules`: cron schedules, sections, and the combined RSS/Hacker News `max_items` limit per delivery. GitHub uses its own section limit.
+  Without an explicit schedule, deliveries default to 10:00 and 20:00 daily,
+  with at most 10 news items each time.
 - `delivery.immediate`: high-score alert threshold and daily limit.
 - `push`: enable Feishu, Discord, or a custom endpoint.
 

@@ -63,6 +63,7 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 - **Job Executor:** Handles `fetch`, `push`, and `preview` execution with mutex locks, run states, and result persistence.
 - **Config Service:** Schema validation, atomic reads/writes, automatic backups, and notifying the Scheduler of changes.
 - **Logging & Audit Service:** Manages rolling log files and audits configuration modifications made by users or agents.
+- **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger Feishu error alerts.
 
 ---
 
@@ -103,14 +104,14 @@ Top-level configuration schema with backward compatibility:
     "schedules": [
       {
         "id": "morning",
-        "cron": "0 8 * * *",
-        "max_items": 8,
+        "cron": "0 10 * * *",
+        "max_items": 10,
         "sections": ["rss", "github", "hackernews", "insights"]
       },
       {
         "id": "evening",
-        "cron": "0 17 * * *",
-        "max_items": 5,
+        "cron": "0 20 * * *",
+        "max_items": 10,
         "sections": ["rss"]
       }
     ],
@@ -120,6 +121,19 @@ Top-level configuration schema with backward compatibility:
 ```
 
 Legacy `schedule.push_cron` settings are automatically migrated to `delivery.schedules` upon initial load.
+When neither modern nor legacy delivery schedules are configured, the system
+defaults to daily deliveries at 10:00 and 20:00 in `delivery.timezone`, with a
+maximum of 10 news items per delivery. Explicit schedules, including an empty
+schedule list used to disable automatic delivery, are preserved.
+
+`delivery.schedules[].max_items` caps one combined headline list containing RSS
+and Hacker News items (10 by default). Hacker News is not exposed as a separate
+delivery or Web UI section. GitHub is independently capped by
+`sections.github_trending.max_items` (3 by default) and starts numbering at 1.
+Each item consists of a title and concise core summary. Metadata and the insights
+section are used for the card title/preview only and are never sent as body text.
+The fixed delivery-title prefix follows the generated title language, preventing
+mixed Chinese/English card titles when a model deviates from the requested language.
 
 ### 3.3 Mutation Safeguards & Concurrency Controls
 
@@ -146,6 +160,20 @@ Submit RSS URL
 
 Feed sources track runtime metrics: enablement status, last successful fetch timestamp, consecutive failure counter, last error message, and auto-pause flags.
 
+Every source is normalized to exactly one broad content category:
+
+- `ai`: AI & Frontier Technology
+- `developer_open_source`: Developers & Open Source
+- `product_startup`: Products & Startups
+- `business_investment`: Business & Investment
+- `technology_policy`: Technology Industry & Policy
+- `other`: General / Other
+
+The Web UI localizes these stable IDs into Chinese or English. Its source list
+shows only enabled sources used by the next fetch, supports category filtering,
+and allows RSS/Atom URLs to be removed. Removing a bundled URL adds it to the
+configuration block list; removing a user-added URL deletes it from `sources.add`.
+
 ### 4.1.1 24-Hour Publication Cutoff Filter
 All fetched news entries (RSS, built-in signals, Hacker News, etc.) are subjected to a strict publication window (`fetch_lookback_minutes: 1440` by default). Entries with publication dates older than the configured lookback are automatically discarded before LLM scoring and persistence.
 
@@ -160,14 +188,33 @@ All fetched news entries (RSS, built-in signals, Hacker News, etc.) are subjecte
 - App Store China, Taiwan, US, Japan, and Korea via Apple RSS JSON.
 - 36Kr, Sspai, and OSChina via RSS.
 - Jike AI Explore, AI Discussion, and Engineers topics via RSSHub.
+- Google News `BUSINESS`, `TECHNOLOGY`, and `SCIENCE` topic RSS feeds for China
+  (`zh-CN`, `CN:zh-Hans`) and the United States (`en-US`, `US:en`). Each of the
+  six country/topic feeds contributes at most 20 entries per fetch.
 
 These entries are scored, deduplicated, stored, and delivered through the existing fetch pipeline.
+
+Google News uses a separate successful-fetch cursor for each country/topic feed,
+stored in `news-data/google-news-state.json`. A feed requests entries published
+after its own previous successful fetch; the initial and maximum recovery window
+is 24 hours. Failed feeds do not advance their cursors. Topic entries retain the
+country and topic tags and map to existing categories as follows:
+`BUSINESS -> business_investment`, `TECHNOLOGY -> technology_policy`, and
+`SCIENCE -> other`.
 
 Signal adapters apply a pre-scoring quality gate before entries reach the LLM. Product Hunt, App Store, Reddit, V2EX, Jike, and domestic media adapters keep AI / LLM / Agent / model-driven application signals and drop obvious noise such as entertainment-only apps, generic local services, roundup posts, casual speculation, unrelated hardware financing, and stale items outside the lookback window. GitHub variants allow AI infrastructure and developer-tool opportunities, but still filter unrelated trending repositories.
 
 ### 4.2 Preference Prompting & Deterministic Re-ranking
 
 Natural language preference string `personal_preferences` guides LLM scoring. The final ranking uses a deterministic scoring formula:
+
+The scoring prompt treats three reader-value tracks as equal top priorities:
+actionable public-equity investment signals, evidence-backed startup opportunities,
+and major AI advances. High scores require concrete evidence such as earnings or
+guidance changes, supply/demand and regulatory catalysts, user/revenue/retention
+traction, validated capability gains, or material adoption. Topic labels, price
+moves, financing announcements, and unverified AI claims do not qualify by
+themselves.
 
 ```text
 final_score = base_llm_score
@@ -178,7 +225,21 @@ final_score = base_llm_score
             - duplicate_penalty
 ```
 
-Final digests are truncated according to the `max_items` parameter of the active schedule.
+Final RSS and Hacker News headlines are combined and truncated according to the
+`max_items` parameter of the active schedule. GitHub is truncated independently.
+Hacker News stories enter the same fetch, LLM scoring, ranking, and digest path as
+all other news; the scheduled delivery does not run a second Hacker News summary.
+The digest receives up to three times the target item count from the ranked pool.
+Its prompt gives equal editorial priority to actionable public-equity news,
+evidence-backed startup opportunities, and major AI/technology advances. When the
+model returns fewer items than requested despite enough complete scored candidates,
+the system fills the remaining slots deterministically from that ranked pool.
+
+Sent history records only candidate URLs that occur in the final delivered Markdown.
+Model inputs omitted from immediate or scheduled output remain eligible for a later
+delivery for up to 24 hours; the previous push timestamp does not discard an unsent
+candidate. Filter logs report score, sent-history, cutoff, diversity,
+candidate-pool, and final-limit counts for each run.
 
 ### 4.3 GitHub Trending Deduplication & Permanent History Retention
 
@@ -213,9 +274,12 @@ Scheduler / Web / Local API / MCP
 
 ### Web UI Pages
 
-1. **Settings:** Preferences, secret state indicators, schedule management, and test triggers.
-2. **Sources:** Bulk RSS/Atom feed insertion, validation, and source management.
-3. **Logs:** Real-time application log viewer (sanitized of secret keys).
+1. **Headlines (default):** Latest generated delivery, opened as the first tab and loaded on page initialization.
+2. **Settings:** Preferences, secret state indicators, schedule management, test
+   triggers, and contextual setup tooltips beside fields such as
+   `FEISHU_WEBHOOK_URL`.
+3. **Sources:** The active fetch list, with bilingual content-category filtering, bulk RSS/Atom validation, and confirmed URL removal.
+4. **Logs:** Real-time application log viewer (sanitized of secret keys).
 
 ### REST API Surface
 
@@ -270,7 +334,11 @@ The background service command `news-agent serve` handles Web/API, scheduling, a
 
 ## 9. Logging & Audit Architecture
 
-Uses Python standard `logging` library with `RotatingFileHandler`:
+Uses Python's standard `logging` library with one directory per calendar day.
+The service keeps the most recent 30 daily directories by default and removes
+older dated directories when logging starts. The retention window is configurable
+through `log.retention_days`.
+
 - `app.log`: Service lifecycle, scheduler events, configuration reloads.
 - `fetch.log` / `push.log`: Task execution details.
 - `web.log` / `mcp.log`: Access logs and interface errors.

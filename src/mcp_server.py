@@ -18,7 +18,7 @@ def create_mcp_server():
 
     config_service = ConfigService()
     config = config_service.load()
-    configure_logging(config_service.paths["logs"], int(config.get("log", {}).get("retention_days", 7)))
+    configure_logging(config_service.paths["logs"], int(config.get("log", {}).get("retention_days", 30)))
     jobs = JobExecutor(config_service)
     logger = logging.getLogger("news_agent.mcp")
     mcp = FastMCP("News Agent")
