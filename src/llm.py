@@ -9,6 +9,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from src.llm_protocol import (
+    ANTHROPIC_MESSAGES,
+    OPENAI_CHAT,
+    OPENAI_RESPONSES,
+    infer_llm_protocol,
+    resolve_llm_endpoint,
+)
 from src.markdown_utils import normalize_str_list, parse_frontmatter
 
 logger = logging.getLogger("news_agent.llm")
@@ -111,34 +118,99 @@ def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> st
     )
 
 
-async def call_llm(
-    prompt: str, config: Dict, response_format: Optional[Dict] = None
-) -> str:
-    """调用LLM API - 统一使用OpenAI兼容接口"""
+def _llm_request(
+    prompt: str,
+    config: Dict,
+    api_key: str,
+    response_format: Optional[Dict] = None,
+) -> tuple[str, str, Dict, Dict]:
+    """Build a protocol-specific URL, headers, and request payload."""
     model = config.get("model", "gpt-4o-mini")
     base_url = config.get("baseUrl", "https://api.openai.com/v1")
-    api_key_name = config.get("apiKeyName", "OPENAI_API_KEY")
+    protocol = config.get("protocol") or infer_llm_protocol(base_url, model)
+    url = resolve_llm_endpoint(base_url, protocol)
 
-    api_key = os.environ.get(api_key_name)
-    if not api_key:
+    if protocol == ANTHROPIC_MESSAGES:
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": str(config.get("anthropic_version", "2023-06-01")),
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": int(config.get("max_tokens", 4096)),
+            "temperature": 0.3,
+        }
+    elif protocol == OPENAI_RESPONSES:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"model": model, "input": prompt}
+        if response_format is not None:
+            payload["text"] = {"format": response_format}
+    else:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+    return protocol, url, headers, payload
+
+
+def _llm_response_text(data: Dict, protocol: str) -> str:
+    """Extract plain text from a protocol-specific response."""
+    if protocol == OPENAI_CHAT:
+        content = data["choices"][0]["message"]["content"]
+        if isinstance(content, str):
+            return content
+        return "".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+        )
+    if protocol == OPENAI_RESPONSES:
+        if isinstance(data.get("output_text"), str):
+            return data["output_text"]
+        return "".join(
+            str(part.get("text", ""))
+            for item in data.get("output", [])
+            if isinstance(item, dict) and item.get("type") == "message"
+            for part in item.get("content", [])
+            if isinstance(part, dict) and part.get("type") == "output_text"
+        )
+    return "".join(
+        str(part.get("text", ""))
+        for part in data.get("content", [])
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+async def call_llm(
+    prompt: str,
+    config: Dict,
+    response_format: Optional[Dict] = None,
+    *,
+    api_key: Optional[str] = None,
+) -> str:
+    """Call an OpenAI Chat, OpenAI Responses, or Anthropic Messages API."""
+    api_key_name = config.get("apiKeyName", "OPENAI_API_KEY")
+    resolved_api_key = api_key or os.environ.get(api_key_name)
+    if not resolved_api_key:
         raise ValueError(f"未设置{api_key_name}环境变量")
 
     import aiohttp
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3,
-    }
-    if response_format is not None:
-        payload["response_format"] = response_format
-
-    url = f"{base_url}/chat/completions"
+    protocol, url, headers, payload = _llm_request(
+        prompt, config, resolved_api_key, response_format
+    )
 
     timeout = aiohttp.ClientTimeout(total=int(config.get("request_timeout", 120)))
     async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
@@ -148,16 +220,21 @@ async def call_llm(
                 raise RuntimeError(f"LLM API错误: {resp.status} - {text}")
 
             data = await resp.json()
-            return data["choices"][0]["message"]["content"]
+            text = _llm_response_text(data, protocol)
+            if not text:
+                raise RuntimeError("LLM API returned no text content")
+            return text
 
 
-async def check_llm_available(config: Dict, timeout_seconds: int = 15) -> str:
+async def check_llm_available(
+    config: Dict, timeout_seconds: int = 15, *, api_key: Optional[str] = None
+) -> str:
     """启动时检查 LLM 接口可用性"""
     prompt = "Reply with OK only."
 
     try:
         response = await asyncio.wait_for(
-            call_llm(prompt, config), timeout=timeout_seconds
+            call_llm(prompt, config, api_key=api_key), timeout=timeout_seconds
         )
     except asyncio.TimeoutError as exc:
         raise RuntimeError(f"LLM可用性检查超时({timeout_seconds}s)") from exc

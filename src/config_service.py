@@ -21,6 +21,7 @@ from dotenv import dotenv_values
 
 from src.runtime import PROJECT_ROOT, default_config_path, ensure_runtime_dirs
 from src.config import merge_sources
+from src.llm_protocol import LLM_PROTOCOLS, infer_llm_protocol
 from src.source_categories import normalize_source_category
 
 
@@ -140,7 +141,12 @@ class ConfigService:
             has_legacy_push_cron=has_legacy_push_cron,
         )
         self.validate(config)
-        config.setdefault("llm", {})["output_language"] = config["output_language"]
+        llm = config.setdefault("llm", {})
+        llm.setdefault(
+            "protocol",
+            infer_llm_protocol(llm.get("baseUrl", ""), llm.get("model", "")),
+        )
+        config["llm"]["output_language"] = config["output_language"]
         config["llm"]["personal_preferences"] = config["personal_preferences"]
         if not has_personal_preferences:
             # Persist the one-time move from the legacy environment variable
@@ -195,6 +201,11 @@ class ConfigService:
             raise ConfigError("personal_preferences is too long")
         if config.get("output_language") not in {"en", "zh"}:
             raise ConfigError("output_language must be 'en' or 'zh'")
+        llm = config.get("llm", {})
+        if not isinstance(llm, dict):
+            raise ConfigError("llm must be an object")
+        if llm.get("protocol") is not None and llm["protocol"] not in LLM_PROTOCOLS:
+            raise ConfigError(f"llm.protocol must be one of: {', '.join(LLM_PROTOCOLS)}")
         for source in config["sources"].get("add", []):
             self.validate_source(source)
         for schedule in config.get("delivery", {}).get("schedules", []):
@@ -340,12 +351,6 @@ class ConfigService:
             config["llm"].pop("output_language", None)
             config["llm"].pop("personal_preferences", None)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        if self.config_path.exists():
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            shutil.copyfile(self.config_path, self.paths["backups"] / f"config-{stamp}.json")
-            backups = sorted(self.paths["backups"].glob("config-*.json"), reverse=True)
-            for stale in backups[20:]:
-                stale.unlink(missing_ok=True)
         fd, name = tempfile.mkstemp(prefix="config-", suffix=".json", dir=self.config_path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

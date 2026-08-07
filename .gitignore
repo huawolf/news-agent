@@ -42,6 +42,8 @@ news-data/
 # Claude/其他代理数据
 .omc/
 .claude/
+.loopx/
+.codex/goals/
 
 # Git worktrees
 .worktrees/

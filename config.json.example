@@ -111,9 +111,9 @@
         "timeout": 10
     },
     "llm": {
-        "provider": "openai",
         "model": "deepseek-v4-flash",
         "baseUrl": "https://api.deepseek.com",
+        "protocol": "openai_chat",
         "apiKeyName": "DEEPSEEK_API_KEY",
         "request_timeout": 240,
         "max_prompt_chars": 12000,

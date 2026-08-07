@@ -31,7 +31,6 @@ def ensure_runtime_dirs() -> dict[str, Path]:
         "base": base,
         "logs": base / "logs",
         "runs": base / "runs",
-        "backups": base / "backups",
         "news_data": base / "news-data",
     }
     for path in paths.values():

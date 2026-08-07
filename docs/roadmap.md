@@ -21,7 +21,7 @@
 - [x] Implement application file logging: `app`, `fetch`, `push`, `web`, `mcp`, `audit` with date-based rotation and auto-cleanup.
 - [x] Retain daily application log directories for 30 days by default.
 - [x] Define `RunRecord` and persist `fetch`/`push`/`preview` statuses, execution sources, stats, and error summaries.
-- [x] Extract `ConfigService`: schema validation, migration logic, inter-process file locks, atomic writes, backups, revision tracking, and auditing.
+- [x] Extract `ConfigService`: schema validation, migration logic, inter-process file locks, atomic writes, revision tracking, and auditing.
 - [x] Maintain backwards compatibility for CLI `fetch` and `push` commands.
 
 **Acceptance:** Existing CLI commands function without starting Web service; invalid or concurrent writes do not corrupt valid configuration; logs operate independently of OS journals.
@@ -50,6 +50,11 @@
 - [x] Support Web UI triggers for manual fetch, preview, and push execution.
 - [x] Add a contextual Feishu Webhook setup tooltip beside its settings field.
 - [x] Make the latest headlines the first and default Web UI tab.
+- [x] Detect and expose OpenAI Chat Completions, OpenAI Responses, and Anthropic
+  Messages protocols, allow manual override, and test model connectivity from
+  current settings before saving.
+- [x] Automatically persist visible model and delivery connection fields after
+  input settles, with serialized writes and inline save status.
 
 **Acceptance:** Users can fully manage feeds, schedules, limits, preferences, and tasks without editing raw JSON files.
 

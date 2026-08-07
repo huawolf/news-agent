@@ -61,7 +61,7 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 - **MCP Server:** Stdio-based MCP transport invoking the shared service layer.
 - **Scheduler:** In-process `APScheduler` handling cron and interval triggers.
 - **Job Executor:** Handles `fetch`, `push`, and `preview` execution with mutex locks, run states, and result persistence.
-- **Config Service:** Schema validation, atomic reads/writes, automatic backups, and notifying the Scheduler of changes.
+- **Config Service:** Schema validation, atomic reads/writes, and notifying the Scheduler of changes.
 - **Logging & Audit Service:** Manages rolling log files and audits configuration modifications made by users or agents.
 - **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger Feishu error alerts.
 
@@ -86,7 +86,6 @@ news-agent/
     mcp.log
     audit.log
   runs/
-  backups/
 ```
 
 - `news-data/`: Retains existing raw payload formats (`fetch-*.json`, `push-*.md`, `notify-*.md`).
@@ -99,6 +98,12 @@ Top-level configuration schema with backward compatibility:
 ```json
 {
   "personal_preferences": "Prioritize AI agents, model releases, and practical developer tools. Prefer Chinese summaries.",
+  "llm": {
+    "model": "deepseek-v4-flash",
+    "baseUrl": "https://api.deepseek.com",
+    "protocol": "openai_chat",
+    "apiKeyName": "DEEPSEEK_API_KEY"
+  },
   "delivery": {
     "timezone": "Asia/Shanghai",
     "schedules": [
@@ -120,6 +125,17 @@ Top-level configuration schema with backward compatibility:
 }
 ```
 
+`llm.protocol` supports `openai_chat`, `openai_responses`, and
+`anthropic_messages`. Protocol detection first examines the endpoint path:
+`/chat/completions`, `/responses` (or `/response`), and `/messages` take
+precedence. If the path is only a base URL, Claude family names (`claude`,
+`opus`, `sonnet`, or `haiku`) select Anthropic Messages, while OpenAI model
+names (`gpt`, `chatgpt`, `o1`, `o3`, or `o4`) select OpenAI Responses. Unknown
+models default to OpenAI Chat Completions for compatibility. The detected value
+is shown in the Web console and can be overridden before saving. Both base URLs
+and complete endpoint URLs are accepted; the request layer normalizes them
+without appending a duplicate protocol path.
+
 Legacy `schedule.push_cron` settings are automatically migrated to `delivery.schedules` upon initial load.
 When neither modern nor legacy delivery schedules are configured, the system
 defaults to daily deliveries at 10:00 and 20:00 in `delivery.timezone`, with a
@@ -139,7 +155,7 @@ mixed Chinese/English card titles when a model deviates from the requested langu
 
 - **Validation:** Pydantic models validate types, value ranges, URLs, cron expressions, and webhook configurations.
 - **Atomic File Operations:** Uses inter-process file locks, temporary swap files, and atomic replaces to prevent corruption during concurrent edits.
-- **Versioning:** Increments configuration revision numbers on write and maintains historic snapshots in `backups/`.
+- **Versioning:** Increments configuration revision numbers on write.
 - **Auditing:** Writes sanitized audit trails to `audit.log` capturing timestamps, invocation sources (`web`/`mcp`/`api`), and mutation summaries (excluding sensitive credentials).
 - **Hot Reloading:** Notifies the in-process Scheduler to dynamically update jobs upon successful writes.
 
@@ -275,9 +291,21 @@ Scheduler / Web / Local API / MCP
 ### Web UI Pages
 
 1. **Headlines (default):** Latest generated delivery, opened as the first tab and loaded on page initialization.
-2. **Settings:** Preferences, secret state indicators, schedule management, test
-   triggers, and contextual setup tooltips beside fields such as
-   `FEISHU_WEBHOOK_URL`.
+2. **Settings:** Preferences, secret state indicators, schedule management, LLM
+   protocol detection and override, an LLM connection test using the current
+   form values, and contextual setup tooltips beside fields such as
+   `FEISHU_WEBHOOK_URL`. The protocol selector and model API key share one
+   responsive settings row for faster connection setup. Visible model and
+   delivery connection fields are automatically persisted after a short input
+   debounce; saves are serialized so an older request cannot overwrite newer
+   form values. Starting a model test flushes any pending connection save first,
+   and periodic status refreshes do not replace connection fields while they are
+   focused, saving, or being tested. Optional integration
+   and control-plane variables (`GITHUB_TOKEN`, `JINA_API_KEY`,
+   `NEWS_AGENT_LOCAL_TOKEN`, and `PH_TOKEN`) remain supported through `.env`
+   but are not rendered in this connection panel. Feishu and Discord webhook
+   fields are rendered next to each other, with Discord immediately following
+   Feishu.
 3. **Sources:** The active fetch list, with bilingual content-category filtering, bulk RSS/Atom validation, and confirmed URL removal.
 4. **Logs:** Real-time application log viewer (sanitized of secret keys).
 
@@ -289,6 +317,8 @@ Scheduler / Web / Local API / MCP
 | `GET` | `/api/config` | Fetch current configuration |
 | `PUT` | `/api/config/preferences` | Update legacy structured preferences |
 | `PUT` | `/api/personal-preferences` | Update natural language preference statement |
+| `PUT` | `/api/llm-settings` | Save model, endpoint, and selected protocol |
+| `POST` | `/api/llm/test` | Test the current model connection without persisting form values |
 | `GET` | `/api/sources` | List configured feed sources |
 | `POST` | `/api/sources` | Add single feed source |
 | `POST` | `/api/sources/verify` | Validate single feed URL |

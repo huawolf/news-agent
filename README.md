@@ -14,7 +14,7 @@ It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio M
 - Set interests, exclusions, source weights, delivery times, and item limits.
 - Run scheduled fetches and deliveries, or trigger them manually.
 - Deliver to Feishu, Discord, or a custom HTTP endpoint.
-- Keep configuration, logs, job history, and backups in the local user-data directory.
+- Keep configuration, logs, and job history in the local user-data directory.
 - Bind the local control plane to `127.0.0.1:12301` by default.
 
 ## Requirements
@@ -41,20 +41,6 @@ Windows PowerShell:
 iwr -useb https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/install.ps1 | iex
 ```
 
-Alternatively, clone the repository and run the installer from its directory:
-
-macOS or Linux:
-
-```bash
-git clone https://github.com/huawolf/news-agent.git && cd news-agent && ./scripts/install.sh
-```
-
-Windows PowerShell:
-
-```powershell
-git clone https://github.com/huawolf/news-agent.git; cd news-agent; powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
-```
-
 The installer creates `.env` from `.env.example`, installs the locked runtime dependencies, and registers a per-user login service. Open <http://127.0.0.1:12301> after installation.
 
 ## Configure
@@ -73,6 +59,10 @@ The first run creates the local configuration from [config.json.example](config.
 Important settings:
 
 - `preferences`: interests, exclusions, source weights, language preference, and diversity limits.
+- `llm`: model, endpoint, API-key environment variable, and protocol. The Web
+  console detects OpenAI Chat Completions, OpenAI Responses, or Anthropic
+  Messages from the endpoint and model name, allows manual override, and can
+  test the current connection before saving.
 - `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
 - `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
 - `log.retention_days`: number of daily log directories to retain; defaults to 30 days.
@@ -135,18 +125,8 @@ Runtime data is stored in the project directory by default:
 | News data | `news-data/` |
 | Logs | `logs/` |
 | Job records | `runs/` |
-| Config backups | `backups/` |
 
 Use `NEWS_AGENT_DATA_DIR` or `NEWS_AGENT_CONFIG` to override these paths. Application logs use rotating files; the project does not depend on system journals.
-
-## Development
-
-```bash
-uv sync
-uv run python -m pytest tests/pytest -q
-```
-
-See [docs/README.md](docs/README.md) for the documentation index and [docs/system-architecture.md](docs/system-architecture.md) for the local control-plane and cross-platform design.
 
 ## Security
 
