@@ -1083,7 +1083,9 @@ def _parse_args() -> argparse.Namespace:
     serve.add_argument("--port", default=12301, type=int)
     sub.add_parser("mcp", help="Start the stdio MCP service")
     service = sub.add_parser("service", help="Manage the local login-start service")
-    service.add_argument("action", choices=["install", "uninstall", "start", "stop", "status"])
+    service.add_argument(
+        "action", choices=["install", "uninstall", "start", "stop", "restart", "status"]
+    )
     return parser.parse_args()
 
 

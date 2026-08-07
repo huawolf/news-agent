@@ -53,7 +53,7 @@ uv sync --locked --no-dev
 echo "Installing the per-user local service..."
 uv run --no-sync python -m src.main service install
 
-echo "Starting the local service..."
-uv run --no-sync python -m src.main service start
+echo "Restarting the local service..."
+uv run --no-sync python -m src.main service restart
 
 echo "News Agent is ready at http://127.0.0.1:12301"

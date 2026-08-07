@@ -395,7 +395,7 @@ through `log.retention_days`.
 
 ## 12. Technical Acceptance Criteria
 
-- Multi-platform service deployment via CLI installer commands.
+- Multi-platform service deployment via CLI lifecycle commands; installers restart any existing service after updating its definition and dependencies.
 - Zero external database dependencies; fully functional from local `127.0.0.1:12301` console.
 - Safe concurrent job execution without duplicated fetches or notifications.
 - Complete audit logging and schema validation across Web, API, and MCP channels.

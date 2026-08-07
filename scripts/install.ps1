@@ -62,7 +62,7 @@ Write-Host "Syncing locked runtime dependencies..."
 Write-Host "Installing the current-user startup task..."
 & $Uv run --no-sync python -m src.main service install
 
-Write-Host "Starting the local service..."
-& $Uv run --no-sync python -m src.main service start
+Write-Host "Restarting the local service..."
+& $Uv run --no-sync python -m src.main service restart
 
 Write-Host "News Agent is ready at http://127.0.0.1:12301"

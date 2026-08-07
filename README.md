@@ -41,7 +41,7 @@ Windows PowerShell:
 iwr -useb https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/install.ps1 | iex
 ```
 
-The installer creates `.env` from `.env.example`, installs the locked runtime dependencies, and registers a per-user login service. Open <http://127.0.0.1:12301> after installation.
+The installer creates `.env` from `.env.example`, installs the locked runtime dependencies, registers a per-user login service, and restarts that service so repeated installs immediately run the updated code. Open <http://127.0.0.1:12301> after installation.
 
 ## Configure
 

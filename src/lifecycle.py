@@ -96,6 +96,24 @@ def stop() -> str:
     return "stopped user systemd service"
 
 
+def restart() -> str:
+    if sys.platform == "darwin":
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.news-agent.local"],
+            check=True,
+        )
+        return "restarted LaunchAgent"
+    if os.name == "nt":
+        subprocess.run(["schtasks", "/End", "/TN", "News Agent"], check=False)
+        subprocess.run(["schtasks", "/Run", "/TN", "News Agent"], check=True)
+        return "restarted Windows Task Scheduler task"
+    subprocess.run(
+        ["systemctl", "--user", "restart", f"{SERVICE_NAME}.service"],
+        check=True,
+    )
+    return "restarted user systemd service"
+
+
 def status() -> str:
     if sys.platform == "darwin":
         return subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/com.news-agent.local"], text=True, capture_output=True).stdout
