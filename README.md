@@ -76,8 +76,8 @@ page to request shared-news authentication.
 Operators running the shared service use `mix` mode. Mix mode performs the
 server fetch/scoring work, retains a rolling 24-hour in-memory cache, exposes
 the shared-news endpoints, and can also run its own client delivery workflow.
-Existing configurations without `mode_settings` continue in `standalone` mode
-for backward compatibility.
+Configurations without `mode_settings` receive the same regular-user `client`
+defaults. Set `standalone` or `mix` explicitly only for self-hosted operation.
 
 Configure the model, endpoint, protocol, API key, and delivery webhooks in the
 **Model and delivery settings** section of the local web console. The fields

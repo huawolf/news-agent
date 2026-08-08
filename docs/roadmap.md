@@ -105,10 +105,16 @@
 
 ### M7: Shared Server And Default Client Mode
 
+- **Completed:** Client fetch isolation now restricts local collection to `sources.add` and unconditionally disables all built-in adapters, including GitHub enrichment and shared-server outage paths.
+- **Completed:** Every client delivery uses the unified server news and GitHub flow, independent of the local GitHub enabled flag or schedule section list.
+- **Completed:** Web-triggered job output is line-buffered so active fetch and push progress is visible before job completion.
+
 - [x] Add `mix` mode with a rolling 24-hour in-memory scored-news cache.
 - [x] Expose shared news, source catalog, latest digest, and GitHub endpoints.
 - [x] Make new regular-user configuration default to `client` mode and the
   shared server at `http://13.158.182.33:12301`.
+- [x] Apply the same client connection when `mode_settings` is absent; require
+  standalone and mix operators to select those modes explicitly.
 - [x] Fetch and score only client-specific RSS sources locally.
 - [x] Keep `processednews` shared-news access separate from the optional private
   `NEWS_AGENT_LOCAL_TOKEN` local-control password.

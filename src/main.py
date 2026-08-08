@@ -313,7 +313,7 @@ async def collect_entries_for_push(
 
     # 1. Retrieve pre-scored news from server
     server_entries = []
-    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    mode = config.get("mode_settings", {}).get("mode", "client")
 
     # Always load the complete eligibility window. A previous delivery may omit
     # qualified candidates, which must remain available until their 24h expiry.
@@ -496,7 +496,7 @@ async def query_server_api(path: str, config: Dict, params: Optional[Dict] = Non
     """Helper to query the server REST API using aiohttp."""
     import aiohttp
     settings = config.get("mode_settings", {})
-    server_url = settings.get("server_url", "http://127.0.0.1:12301").rstrip("/")
+    server_url = settings.get("server_url", "http://13.158.182.33:12301").rstrip("/")
     token = get_server_api_token(config)
 
     headers = {}
@@ -522,77 +522,44 @@ async def run_fetch_job(config: Dict):
     print(f"{'=' * 50}")
 
     # Check mode settings
-    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    mode = config.get("mode_settings", {}).get("mode", "client")
     sources = merge_sources(config["sources"])
 
     if mode == "client":
         import copy
         fetch_config = copy.deepcopy(config)
+        source_config = config.get("sources", {})
+        sources = merge_sources(
+            {
+                **source_config,
+                "base_opml": "",
+                "add": source_config.get("add", []),
+            }
+        )
+
+        # Shared built-in sources belong exclusively to the server. A client
+        # only fetches user-added RSS feeds, regardless of server availability
+        # or which integrations the server currently has enabled.
+        sections = fetch_config.setdefault("sections", {})
+        for section_name in ("github_trending", "hackernews", "google_news", "signals"):
+            sections.setdefault(section_name, {})["enabled"] = False
+
         print("🔌 Running in Client Mode. Querying server for active sources...")
         server_sources = await query_server_api("/api/server/sources", config)
         if server_sources:
-            # 1. Filter RSS sources (only keep custom feeds not on the server)
+            # Avoid fetching a user-added feed that the shared server already
+            # provides, while never importing the server's source catalog into
+            # the client's local workload.
             server_rss_urls = {s.get("xmlUrl") for s in server_sources.get("rss", []) if s.get("xmlUrl")}
             sources = [s for s in sources if s.get("xmlUrl") not in server_rss_urls]
             print(f"🔌 Filtered RSS sources. Custom local RSS feeds to fetch: {len(sources)}")
-
-            # 2. Filter integrations/sections
-            server_integrations = {i["id"]: i for i in server_sources.get("integrations", []) if "id" in i}
-
-            # GitHub Trending
-            if fetch_config.get("sections", {}).get("github_trending", {}).get("enabled"):
-                s_gh = server_integrations.get("github_trending")
-                if s_gh and s_gh.get("enabled"):
-                    print("🔌 GitHub Trending is enabled on the server. Skipping local fetch.")
-                    fetch_config["sections"]["github_trending"]["enabled"] = False
-
-            # Hacker News
-            if fetch_config.get("sections", {}).get("hackernews", {}).get("enabled"):
-                s_hn = server_integrations.get("hackernews")
-                if s_hn and s_hn.get("enabled"):
-                    print("🔌 Hacker News is enabled on the server. Skipping local fetch.")
-                    fetch_config["sections"]["hackernews"]["enabled"] = False
-
-            # Google News (google-news-...)
-            if fetch_config.get("sections", {}).get("google_news", {}).get("enabled"):
-                any_google_news_server = any(
-                    id_str.startswith("google-news-") and i.get("enabled")
-                    for id_str, i in server_integrations.items()
-                )
-                if any_google_news_server:
-                    print("🔌 Google News is enabled on the server. Skipping local fetch.")
-                    fetch_config["sections"]["google_news"]["enabled"] = False
-
-            # Signals
-            if fetch_config.get("sections", {}).get("signals", {}).get("enabled"):
-                local_signals_sources = fetch_config["sections"]["signals"].setdefault("sources", {})
-                for sig_id in list(local_signals_sources.keys()):
-                    s_sig = server_integrations.get(sig_id)
-                    if s_sig and s_sig.get("enabled"):
-                        local_signals_sources[sig_id] = False
-                print("🔌 Filtered signal sources to avoid server duplicate fetching.")
-
-            config = fetch_config
         else:
-            # A client outage must not silently turn into a full server workload.
-            # Keep user-added RSS feeds working, but leave shared built-in sources
-            # to the upstream server so client-side scoring costs remain bounded.
-            source_config = config.get("sources", {})
-            sources = merge_sources(
-                {
-                    **source_config,
-                    "base_opml": "",
-                    "add": source_config.get("add", []),
-                }
-            )
-            sections = fetch_config.setdefault("sections", {})
-            for section_name in ("hackernews", "google_news", "signals"):
-                sections.setdefault(section_name, {})["enabled"] = False
-            config = fetch_config
             print(
                 "⚠️ Could not connect to server. Fetching only user-added "
                 f"RSS sources locally ({len(sources)} configured)."
             )
+        print("🔌 Disabled all built-in source fetching in Client Mode.")
+        config = fetch_config
 
     interval = config["schedule"]["fetch_interval_minutes"]
     lookback = config["schedule"].get("fetch_lookback_minutes", 1440)
@@ -605,7 +572,10 @@ async def run_fetch_job(config: Dict):
     print(f"📂 Sources configured: {len(sources)}")
 
     if not sources:
-        print("ℹ️ No configured RSS sources; continuing with built-in sources")
+        if mode == "client":
+            print("ℹ️ No user-added RSS sources configured for local fetching")
+        else:
+            print("ℹ️ No configured RSS sources; continuing with built-in sources")
 
     max_workers = config.get("fetch", {}).get("max_workers", 20)
     timeout = config.get("fetch", {}).get("timeout", 30)
@@ -618,28 +588,31 @@ async def run_fetch_job(config: Dict):
 
     # 2. Fetch built-in signal sources.
     signal_entries = []
-    try:
-        signal_entries = await fetch_signal_entries(config, cutoff_time=cutoff)
-        print(f"📥 Signals: fetched {len(signal_entries)} built-in signal entries")
-    except Exception as e:
-        print(f"⚠️ Signals fetch failed: {e}")
+    if config.get("sections", {}).get("signals", {}).get("enabled", False):
+        try:
+            signal_entries = await fetch_signal_entries(config, cutoff_time=cutoff)
+            print(f"📥 Signals: fetched {len(signal_entries)} built-in signal entries")
+        except Exception as e:
+            print(f"⚠️ Signals fetch failed: {e}")
 
     # 3. Fetch incremental Google News topic feeds using per-feed cursors.
     google_news_entries = []
-    try:
-        google_news_entries = await fetch_google_news_entries(config)
-        print(f"📥 Google News: fetched {len(google_news_entries)} topic entries")
-    except Exception as e:
-        print(f"⚠️ Google News fetch failed: {e}")
+    if config.get("sections", {}).get("google_news", {}).get("enabled", False):
+        try:
+            google_news_entries = await fetch_google_news_entries(config)
+            print(f"📥 Google News: fetched {len(google_news_entries)} topic entries")
+        except Exception as e:
+            print(f"⚠️ Google News fetch failed: {e}")
 
     # 4. Fetch Hacker News concurrently using Algolia comment data.
     hn_entries = []
-    try:
-        from src.fetcher import fetch_hackernews_entries
-        hn_entries = await fetch_hackernews_entries(config, cutoff_time=cutoff)
-        print(f"📥 HN: fetched {len(hn_entries)} enriched popular-comment entries")
-    except Exception as e:
-        print(f"⚠️ HN fetch failed: {e}")
+    if config.get("sections", {}).get("hackernews", {}).get("enabled", False):
+        try:
+            from src.fetcher import fetch_hackernews_entries
+            hn_entries = await fetch_hackernews_entries(config, cutoff_time=cutoff)
+            print(f"📥 HN: fetched {len(hn_entries)} enriched popular-comment entries")
+        except Exception as e:
+            print(f"⚠️ HN fetch failed: {e}")
 
     # Merge sources.
     raw_all_entries = entries + signal_entries + google_news_entries + hn_entries
@@ -725,7 +698,7 @@ async def run_fetch_job(config: Dict):
     print(f"💾 Saved to {fetch_file}")
 
     # Update in-memory cache if we are in server (mix/standalone) mode
-    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    mode = config.get("mode_settings", {}).get("mode", "client")
     if mode in ("standalone", "mix"):
         try:
             from src.server_cache import server_news_cache
@@ -821,7 +794,7 @@ async def run_push_job(config: Dict):
     print(f"{'=' * 50}")
 
     # If in client mode and no local LLM is configured, pull pre-compiled digest directly from server
-    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    mode = config.get("mode_settings", {}).get("mode", "client")
     has_local_llm = False
     llm_cfg = config.get("llm", {})
     api_key_name = llm_cfg.get("apiKeyName")
@@ -850,7 +823,7 @@ async def run_push_job(config: Dict):
     use_extended_sections = bool(policy.get("sections")) and any(
         section != "rss" for section in policy["sections"]
     )
-    if use_extended_sections or (not policy and is_morning_push(now_local(config), config)):
+    if mode == "client" or use_extended_sections or (not policy and is_morning_push(now_local(config), config)):
         await _run_morning_push(config)
     else:
         await _run_default_push(config)

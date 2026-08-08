@@ -67,8 +67,8 @@ def load_config(config_path: str = "config.json") -> Dict:
 
     # Server-Client mode settings
     mode_settings = config.setdefault("mode_settings", {})
-    mode_settings.setdefault("mode", "standalone")
-    mode_settings.setdefault("server_url", "http://127.0.0.1:12301")
+    mode_settings.setdefault("mode", "client")
+    mode_settings.setdefault("server_url", "http://13.158.182.33:12301")
     mode_settings.setdefault("server_api_token_name", "processednews")
 
     return config

@@ -69,13 +69,13 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 
 To optimize LLM token usage and reduce cost across multiple deployments, the system supports a distributed Server-Client architecture configured via `mode_settings`:
 
-- **Standalone Mode (Backward Compatibility):** The daemon runs independently.
-  Configurations created before `mode_settings` remain standalone so upgrades
-  do not silently change their data source.
+- **Standalone Mode:** The daemon runs independently when explicitly selected.
+  Configurations without `mode_settings` receive the regular-user client
+  defaults.
 - **Mix Mode:** Acts as both a Server and a Client:
   - **Server Responsibilities:** Periodically fetches and scores configured RSS and signal sources, maintains a rolling 24-hour in-memory cache of scored entries, and exposes the `GET /api/server/news` REST API endpoint.
   - **Client Responsibilities:** Runs push schedules locally, merging cache data with client-side custom feeds before sending.
-- **Client Mode:** Client-only mode. It disables server-side scheduling. When a scheduled push is triggered, the client queries the server's API to retrieve pre-scored news from the last 24 hours. If any custom feeds are configured on the client that do not exist on the server, the client fetches and scores them locally, merges both datasets, and formats/delivers the digest.
+- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours and the pre-compiled GitHub section. This unified client behavior ignores the local `sections.github_trending.enabled` flag and per-schedule section selection; those controls remain applicable to standalone and mix modes. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
   Every delivery query requests the complete rolling 24-hour eligibility window;
   local sent history removes delivered URLs. If the server is unavailable, the
   client may continue fetching user-added RSS feeds but must not fall back to
@@ -349,6 +349,9 @@ Scheduler / Web / Local API / MCP
    but are not rendered in this connection panel. Feishu and Discord webhook
    fields are rendered next to each other, with Discord immediately following
    Feishu.
+   Initial page requests may receive concurrent `401` responses. Once one
+   request stores a valid local token in session storage, the remaining requests
+   detect that update and retry silently instead of opening repeated prompts.
 3. **Sources:** The active fetch list, with bilingual content-category filtering, bulk RSS/Atom validation, and confirmed URL removal.
 4. **Logs:** Real-time application log viewer (sanitized of secret keys).
 

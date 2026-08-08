@@ -106,8 +106,8 @@ class ConfigService:
             "delivery": {"timezone": "Asia/Shanghai", "schedules": [],
                          "immediate": {"enabled": False, "threshold": 90, "daily_limit": 3}},
             "mode_settings": {
-                "mode": "standalone",
-                "server_url": "http://127.0.0.1:12301",
+                "mode": "client",
+                "server_url": "http://13.158.182.33:12301",
                 "server_api_token_name": "processednews",
             },
             "storage": {"data_dir": str(self.paths["news_data"])},

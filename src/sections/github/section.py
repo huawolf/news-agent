@@ -18,20 +18,13 @@ from src.storage import load_trending_history
 async def run_github_section(
     config: Dict, now: Optional[datetime] = None
 ) -> Tuple[str, Optional[str]]:
+    mode = config.get("mode_settings", {}).get("mode", "client")
     cfg = config.get("sections", {}).get("github_trending", {})
-    if not cfg.get("enabled", False):
+    if mode != "client" and not cfg.get("enabled", False):
         return "", None
 
-    import os
-    mode = config.get("mode_settings", {}).get("mode", "standalone")
-    has_local_llm = False
-    llm_cfg = config.get("llm", {})
-    api_key_name = llm_cfg.get("apiKeyName")
-    if api_key_name and os.environ.get(api_key_name):
-        has_local_llm = True
-
-    if mode == "client" and not has_local_llm:
-        print("🔌 Client has no LLM configured. Fetching pre-compiled GitHub Trending from server...")
+    if mode == "client":
+        print("🔌 Client Mode: fetching pre-compiled GitHub Trending from server...")
         try:
             from src.main import query_server_api
             res = await query_server_api("/api/server/github-trending", config)

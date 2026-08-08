@@ -144,7 +144,7 @@ def _html() -> str:
 <section class=\"wide\"><h2 id=\"scheduleTitle\" data-t=\"schedule\">Delivery times</h2><p data-t=\"scheduleHint\">Choose one or more weekdays, a time, and the maximum number of items for each delivery.</p><div id=\"scheduleRows\"></div><div class=\"actions\"><button class=\"secondary\" onclick=\"addSchedule()\" data-t=\"addTime\">Add delivery time</button><button onclick=\"saveSchedule()\" data-t=\"saveSchedule\">Save delivery times</button></div></section></div></div>
 <div id=\"sources\" class=\"tab-panel\"><section><h2 data-t=\"addSources\">Add news sources</h2><p data-t=\"sourceHint\">Paste one RSS or Atom feed URL per line. Each URL is checked before it is added.</p><textarea id=\"sourceUrls\" rows=\"7\" placeholder=\"https://example.com/feed.xml\"></textarea><div class=\"actions\"><button onclick=\"addBulkSources()\" data-t=\"verifyAdd\">Verify and add sources</button></div><div id=\"sourceResults\" class=\"source-results\"></div></section><section><h2 data-t=\"currentSources\">Current news sources</h2><p data-t=\"currentSourcesHint\">This list is the set of sources used by the next fetch.</p><div class=\"source-toolbar\"><input id=\"sourceSearch\" oninput=\"renderSources()\" data-t-placeholder=\"search\" placeholder=\"Search sources\"><select id=\"sourceCategory\" onchange=\"renderSources()\"></select></div><div id=\"sourceList\" class=\"source-list\"></div></section></div>
 <div id=\"logs\" class=\"tab-panel\"><section><div class=\"logs-header\"><div><h2 data-t=\"logs\">Logs</h2><p data-t=\"logsHint\">Recent application events. Secrets are not recorded.</p></div><button class=\"compact-button\" onclick=\"loadLogs()\" data-t=\"refresh\">Refresh</button></div><pre id=\"logsOutput\"></pre></section></div></main><script>
-async function api(url,o={},retry=true){let token=sessionStorage.getItem('news-agent-token');let headers={'Content-Type':'application/json',...(token?{'X-News-Agent-Token':token}:{})};let r=await fetch(url,{headers,...o});let text=await r.text();let d=null;try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText||'Request failed'}}if(r.status===401&&retry){let next=prompt('Enter the local API token');if(next){sessionStorage.setItem('news-agent-token',next);return api(url,o,false)}}if(!r.ok)throw Error(d.detail||'Request failed');return d}
+async function api(url,o={},retry=true){let token=sessionStorage.getItem('news-agent-token');let headers={'Content-Type':'application/json',...(token?{'X-News-Agent-Token':token}:{})};let r=await fetch(url,{headers,...o});let text=await r.text();let d=null;try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText||'Request failed'}}if(r.status===401&&retry){let current=sessionStorage.getItem('news-agent-token');if(current&&current!==token)return api(url,o,false);let next=prompt('Enter the local API token');if(next){sessionStorage.setItem('news-agent-token',next);return api(url,o,false)}}if(!r.ok)throw Error(d.detail||'Request failed');return d}
 const words={en:{subtitle:'Local news collection, delivery, and agent control.',settings:'Settings',headlines:'Headlines',headlinesEmpty:'No generated headlines yet.',headlineFile:'Latest generated delivery',headlineRss:'Top News',headlineGithub:'GitHub Highlights',sources:'Sources',logs:'Logs',secrets:'Model and delivery settings',secretsHint:'Model and delivery connection values are shown below. Keep this page private.',saveSecrets:'Save settings',model:'Model',apiUrl:'API URL',modelApiKey:'Model API key',preferencesHint:'Describe the topics, sources, style, and language you want to prioritize.',preferencesPlaceholder:'For example: Prioritize AI agents, model releases, and practical developer tools. Prefer Chinese summaries.',save:'Save',runTitle:'Run now',runHint:'Fetch, score, generate, and deliver one complete news cycle.',run:'Run once',stop:'Stop',runningJob:'Running once now.',idleJob:'Not running.',stopping:'Stopping...',schedule:'Delivery times',scheduleHint:'Choose one or more weekdays, a time, and the maximum number of items for each delivery.',weekdays:'Weekdays',time:'Time',maxItems:'Max items',remove:'Remove',addTime:'Add delivery time',saveSchedule:'Save delivery times',addSources:'Add news sources',sourceHint:'Paste one RSS or Atom feed URL per line. Each URL is checked before it is added.',verifyAdd:'Verify and add sources',currentSources:'Current news sources',currentSourcesHint:'RSS feeds plus built-in signal sources.',search:'Search sources',logsHint:'Recent application events. Secrets are not recorded.',refresh:'Refresh',configured:'configured',missing:'not configured',saved:'Saved.',required:'Required',running:'Running',deliveryTimes:'delivery times',rssSources:'RSS sources',sourceAdded:'Added',sourceRejected:'Could not add'},zh:{subtitle:'本地新闻收集、推送与 Agent 控制。',settings:'设置',headlines:'头条新闻',headlinesEmpty:'还没有生成过头条新闻。',headlineFile:'最新生成的推送内容',headlineRss:'头条新闻',headlineGithub:'GitHub 内容',sources:'新闻来源',logs:'日志',secrets:'模型与推送设置',secretsHint:'模型与推送连接配置显示在下方，请勿共享此页面。',saveSecrets:'保存设置',model:'模型',apiUrl:'API 地址',modelApiKey:'模型 API Key',preferencesHint:'用一句话描述你希望优先关注的主题、来源、风格和语言。',preferencesPlaceholder:'例如：优先关注 AI Agent、模型发布和实用开发工具，中文摘要优先。',save:'保存',runTitle:'立即运行',runHint:'完成一次抓取、评分、生成和发送流程。',run:'运行一次',stop:'停止',runningJob:'正在运行本次流程。',idleJob:'当前未运行。',stopping:'正在停止...',schedule:'发送时间',scheduleHint:'为每次发送选择星期、时间和最多发送条数。',weekdays:'星期',time:'时间',maxItems:'最多条数',remove:'删除',addTime:'增加发送时间',saveSchedule:'保存发送时间',addSources:'增加新闻来源',sourceHint:'每行粘贴一个 RSS 或 Atom 地址。系统会检查通过后再添加。',verifyAdd:'检查并添加',currentSources:'已有新闻来源',currentSourcesHint:'包含 RSS 和内置信号源。',search:'搜索来源',logsHint:'最近应用事件，不会记录密钥。',refresh:'刷新',configured:'已配置',missing:'未配置',saved:'已保存。',required:'必填',running:'运行中',deliveryTimes:'个发送时间',rssSources:'个 RSS 来源',sourceAdded:'已添加',sourceRejected:'无法添加'}};
 Object.assign(words.en,{currentSourcesHint:'This is the active source list used by the next fetch.',allCategories:'All categories',removeSource:'Delete',confirmRemoveSource:'Remove this URL from future fetches?',sourceRemoved:'Source removed.',noSources:'No active sources found.',category_ai:'AI & Frontier Technology',category_developer_open_source:'Developers & Open Source',category_product_startup:'Products & Startups',category_business_investment:'Business & Investment',category_technology_policy:'Technology Industry & Policy',category_other:'General / Other'});Object.assign(words.zh,{currentSourcesHint:'这是下一次抓取会实际使用的来源清单。',allCategories:'全部类别',removeSource:'删除',confirmRemoveSource:'确定从后续实际抓取清单中删除这个 URL？',sourceRemoved:'来源已删除。',noSources:'没有符合条件的启用来源。',category_ai:'AI 与前沿技术',category_developer_open_source:'开发者与开源',category_product_startup:'产品与创业',category_business_investment:'商业与投资',category_technology_policy:'科技产业与政策',category_other:'综合 / 其他'});
 Object.assign(words.en,{protocol:'Protocol',testModel:'Test model',testingModel:'Testing model...',modelTestOk:'Model is available'});Object.assign(words.zh,{protocol:'协议类型',testModel:'测试模型',testingModel:'正在测试模型...',modelTestOk:'模型可用'});
@@ -208,7 +208,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         config = service.load()
-        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        mode = config.get("mode_settings", {}).get("mode", "client")
         if mode in ("standalone", "mix"):
             from src.server_cache import server_news_cache
             data_dir = config.get("storage", {}).get("data_dir", "news-data")
@@ -238,7 +238,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/server/news", dependencies=[Depends(require_server_api_token)])
     async def get_server_news(hours: int = 24) -> list[dict]:
         config = service.load()
-        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        mode = config.get("mode_settings", {}).get("mode", "client")
         if mode not in ("standalone", "mix"):
             raise HTTPException(status_code=400, detail="Server news API is only available on standalone or mix mode servers")
 
@@ -248,7 +248,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/server/latest-digest", dependencies=[Depends(require_server_api_token)])
     async def get_server_latest_digest() -> dict:
         config = service.load()
-        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        mode = config.get("mode_settings", {}).get("mode", "client")
         if mode not in ("standalone", "mix"):
             raise HTTPException(status_code=400, detail="Server latest-digest API is only available on standalone or mix mode servers")
 
@@ -274,7 +274,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/server/github-trending", dependencies=[Depends(require_server_api_token)])
     async def get_server_github_trending() -> dict:
         config = service.load()
-        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        mode = config.get("mode_settings", {}).get("mode", "client")
         if mode not in ("standalone", "mix"):
             raise HTTPException(status_code=400, detail="Server github-trending API is only available on standalone or mix mode servers")
 
@@ -459,7 +459,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/server/sources", dependencies=[Depends(require_server_api_token)])
     async def shared_news_sources() -> dict:
         config = service.load()
-        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        mode = config.get("mode_settings", {}).get("mode", "client")
         if mode not in ("standalone", "mix"):
             raise HTTPException(
                 status_code=400,
