@@ -371,7 +371,7 @@ async def collect_entries_for_push(
     print(f"📋 Entries after score filtering: {len(qualified_entries)}")
 
     # Load sent history for deduplication.
-    sent_links = load_sent_links(days=30, data_dir=data_dir)
+    sent_links = load_sent_links(days=3, data_dir=data_dir)
     print(f"📋 Sent history loaded: {len(sent_links)} filtered links")
 
     # Keep unsent candidates eligible for 24 hours. Sent history, rather than the

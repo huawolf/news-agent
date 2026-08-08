@@ -22,6 +22,32 @@ async def run_github_section(
     if not cfg.get("enabled", False):
         return "", None
 
+    import os
+    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    has_local_llm = False
+    llm_cfg = config.get("llm", {})
+    api_key_name = llm_cfg.get("apiKeyName")
+    if api_key_name and os.environ.get(api_key_name):
+        has_local_llm = True
+
+    if mode == "client" and not has_local_llm:
+        print("🔌 Client has no LLM configured. Fetching pre-compiled GitHub Trending from server...")
+        try:
+            from src.main import query_server_api
+            res = await query_server_api("/api/server/github-trending", config)
+            if res and res.get("found"):
+                github_md = res.get("github", "").strip()
+                if github_md:
+                    print("🔌 Retrieved pre-compiled GitHub Trending from server")
+                    return github_md, None
+                else:
+                    print("⚠️ Server pre-compiled GitHub Trending is empty")
+            else:
+                print("⚠️ Failed to retrieve pre-compiled GitHub Trending from server")
+        except Exception as e:
+            print(f"⚠️ Error querying server for GitHub Trending: {e}")
+        return "", None
+
     # 延迟 import,Task 11 才提供 summarize_github_trending
     from src.llm import summarize_github_trending
 

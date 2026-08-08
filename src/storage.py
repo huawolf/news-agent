@@ -651,8 +651,8 @@ def assemble_with_sentinels(sections: Dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
-def load_sent_links(days: int = 30, data_dir: str = "news-data") -> set:
-    """加载 sent-history.json 中 30 天内已发送的链接，并自动清理过期条目"""
+def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
+    """加载 sent-history.json 中 3 天内已发送的链接，并自动清理过期条目"""
     path = Path(data_dir) / "sent-history.json"
     if not path.exists() or path.stat().st_size == 0:
         return set()

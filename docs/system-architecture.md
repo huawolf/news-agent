@@ -350,6 +350,7 @@ Scheduler / Web / Local API / MCP
 | `GET` | `/api/logs` | Fetch system logs |
 | `GET` | `/api/server/news` | Pull pre-scored news within a specified time window (up to 24h) |
 | `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
+| `GET` | `/api/server/github-trending` | Pull the latest pre-compiled GitHub Trending section Markdown |
 
 Local security: API binds to `127.0.0.1:12301` and supports optional token verification (`X-News-Agent-Token`).
 
