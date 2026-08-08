@@ -34,6 +34,16 @@ def get_timezone(config: Dict = None) -> timezone:
     return timezone(timedelta(hours=hours))
 
 
+def get_server_api_token(config: Dict) -> str:
+    """Return the shared-news API value without consulting local control auth."""
+    settings = config.get("mode_settings", {})
+    return str(
+        settings.get("server_api_token")  # Legacy configuration.
+        or settings.get("server_api_token_name")
+        or "processednews"
+    ).strip()
+
+
 # 向后兼容的别名
 def get_cst(config: Dict = None) -> timezone:
     """向后兼容，使用 get_timezone"""
@@ -59,7 +69,7 @@ def load_config(config_path: str = "config.json") -> Dict:
     mode_settings = config.setdefault("mode_settings", {})
     mode_settings.setdefault("mode", "standalone")
     mode_settings.setdefault("server_url", "http://127.0.0.1:12301")
-    mode_settings.setdefault("server_api_token", "processednews")
+    mode_settings.setdefault("server_api_token_name", "processednews")
 
     return config
 

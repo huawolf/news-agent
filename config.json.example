@@ -146,7 +146,7 @@
     "mode_settings": {
         "mode": "client",
         "server_url": "http://13.158.182.33:12301",
-        "server_api_token": "processednews"
+        "server_api_token_name": "processednews"
     },
     "sources": {
         "base_opml": "resources/rss.opml",

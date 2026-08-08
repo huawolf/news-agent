@@ -69,11 +69,33 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 
 To optimize LLM token usage and reduce cost across multiple deployments, the system supports a distributed Server-Client architecture configured via `mode_settings`:
 
-- **Standalone Mode (Default):** The daemon runs independently. Fetching, scoring, and push loops are executed locally in a self-contained process.
+- **Standalone Mode (Backward Compatibility):** The daemon runs independently.
+  Configurations created before `mode_settings` remain standalone so upgrades
+  do not silently change their data source.
 - **Mix Mode:** Acts as both a Server and a Client:
   - **Server Responsibilities:** Periodically fetches and scores configured RSS and signal sources, maintains a rolling 24-hour in-memory cache of scored entries, and exposes the `GET /api/server/news` REST API endpoint.
   - **Client Responsibilities:** Runs push schedules locally, merging cache data with client-side custom feeds before sending.
 - **Client Mode:** Client-only mode. It disables server-side scheduling. When a scheduled push is triggered, the client queries the server's API to retrieve pre-scored news from the last 24 hours. If any custom feeds are configured on the client that do not exist on the server, the client fetches and scores them locally, merges both datasets, and formats/delivers the digest.
+  Every delivery query requests the complete rolling 24-hour eligibility window;
+  local sent history removes delivered URLs. If the server is unavailable, the
+  client may continue fetching user-added RSS feeds but must not fall back to
+  fetching and scoring the server's bundled RSS or signal catalog.
+
+New regular-user configurations default to:
+
+```json
+"mode_settings": {
+  "mode": "client",
+  "server_url": "http://13.158.182.33:12301",
+  "server_api_token_name": "processednews"
+}
+```
+
+Despite its historical field name, `server_api_token_name` contains the direct
+shared-news API value. `processednews` is not treated as a protected secret.
+It is completely separate from `NEWS_AGENT_LOCAL_TOKEN`, which optionally
+protects only the local Web configuration, jobs, logs, and management APIs.
+Neither credential is accepted as a fallback for the other's API surface.
 
 ---
 
@@ -266,6 +288,12 @@ To optimize LLM token usage and reduce API cost without compromising digest qual
 2. **Second Stage (Digest Synthesis & Lazy Summarization):** High-quality candidates passing the score threshold enter digest synthesis (`compose_digest` / `generate_immediate_push`), where the model generates Markdown headlines and summaries directly for selected items.
 3. **Slimmed Deduplication Context:** Recent push history provided for LLM deduplication is formatted as a compact `[Title | Link | Summary]` list rather than raw multi-paragraph Markdown.
 
+When digest synthesis combines multiple reports about the same event into one
+headline, it must retain every cited source URL. Link labels are numbered in
+source order (`Read original 1`, `Read original 2`, or their Chinese
+equivalents); single-source headlines keep the unnumbered label. Sent-history
+tracking continues to mark each URL that appears in the delivered Markdown.
+
 Sent history records only candidate URLs that occur in the final delivered Markdown.
 Model inputs omitted from immediate or scheduled output remain eligible for a later
 delivery for up to 24 hours; the previous push timestamp does not discard an unsent
@@ -349,10 +377,21 @@ Scheduler / Web / Local API / MCP
 | `GET` | `/api/jobs/{id}` | Query job status and record |
 | `GET` | `/api/logs` | Fetch system logs |
 | `GET` | `/api/server/news` | Pull pre-scored news within a specified time window (up to 24h) |
+| `GET` | `/api/server/sources` | Pull the shared server source catalog used for client-side filtering |
 | `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
 | `GET` | `/api/server/github-trending` | Pull the latest pre-compiled GitHub Trending section Markdown |
 
-Local security: API binds to `127.0.0.1:12301` and supports optional token verification (`X-News-Agent-Token`).
+Authentication is intentionally split:
+
+- Shared read endpoints (`/api/server/*`) accept the
+  non-private `processednews` value in `X-News-Agent-Token`.
+- Local configuration, environment, source listing/mutation, job, and log
+  endpoints, including `/api/news-sources`, use `NEWS_AGENT_LOCAL_TOKEN` when
+  configured. They never accept `processednews` as a fallback.
+
+Regular clients bind to `127.0.0.1:12301`. A mix server can bind to a reachable
+interface for multiple clients, but should set `NEWS_AGENT_LOCAL_TOKEN` before
+doing so and apply network restrictions where practical.
 
 ---
 

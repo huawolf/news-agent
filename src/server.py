@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.app_logging import configure_logging
 from src.app_logging import current_log_dir
+from src.config import get_server_api_token
 from src.config_service import ConfigError, ConfigService
 from src.environment_service import EnvironmentError, EnvironmentService
 from src.jobs import JobExecutor
@@ -198,16 +199,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     async def require_server_api_token(x_news_agent_token: str | None = Header(default=None)) -> None:
         config = service.load()
-        expected_api = config.get("mode_settings", {}).get("server_api_token", "processednews")
-        expected_admin = os.environ.get("NEWS_AGENT_LOCAL_TOKEN")
-
-        if expected_api and x_news_agent_token == expected_api:
+        expected_api = get_server_api_token(config)
+        if not expected_api:
             return
-        if expected_admin and x_news_agent_token == expected_admin:
-            return
-        if not expected_api and not expected_admin:
-            return
-        raise HTTPException(status_code=401, detail="invalid token")
+        if x_news_agent_token != expected_api:
+            raise HTTPException(status_code=401, detail="invalid shared news token")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -434,8 +430,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 results.append({"url": url, "status": "rejected", "reason": str(exc)})
         return {"results": results}
 
-    @app.get("/api/news-sources", dependencies=[Depends(require_server_api_token)])
-    async def news_sources() -> dict:
+    def news_sources_payload() -> dict:
         config = service.load()
         return {
             "rss": service.sources(config),
@@ -456,6 +451,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 ],
             ],
         }
+
+    @app.get("/api/news-sources", dependencies=[Depends(require_token)])
+    async def news_sources() -> dict:
+        return news_sources_payload()
+
+    @app.get("/api/server/sources", dependencies=[Depends(require_server_api_token)])
+    async def shared_news_sources() -> dict:
+        config = service.load()
+        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        if mode not in ("standalone", "mix"):
+            raise HTTPException(
+                status_code=400,
+                detail="Server sources API is only available on standalone or mix mode servers",
+            )
+        return news_sources_payload()
 
     @app.get("/api/headlines", dependencies=[Depends(require_token)])
     async def headlines() -> dict:

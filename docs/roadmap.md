@@ -10,6 +10,9 @@
 - **Implemented:** Dynamic RSS feed addition/blocking in `config.json`, file persistence in `news-data/` (JSON/Markdown).
 - **Archived:** Legacy Linux `systemd timer` and `journald` deployment archived; replaced by cross-platform daemon architecture.
 - **Completed:** Local Web/API, stdio MCP server, natural language preference ranking, built-in APScheduler, rolling file logger, macOS/Windows service lifecycle management.
+- **Completed:** One mix server can fetch and score the shared catalog for many
+  default client-mode users while preserving local custom feeds and delivery
+  preferences.
 
 ---
 
@@ -79,6 +82,7 @@
 - [x] Combine RSS and Hacker News into one headline list capped at 10, while keeping GitHub separately numbered and capped at 3.
 - [x] Strip metadata from outgoing message bodies.
 - [x] Use a 3x ranked candidate pool, fill undersized digests, and mark only links actually present in delivered content as sent.
+- [x] Preserve and number all original links when one digest headline combines multiple reports.
 - [x] Implement deterministic re-ranking and digest item truncation on top of base LLM scores.
 - [x] Implement RSS validation, explicit private network URL protection (SSRF defense), and URL deduplication.
 - [x] Normalize sources into six bilingual content categories and support filtering and URL removal from the active fetch list.
@@ -98,6 +102,20 @@
 - [ ] Perform full verification on clean macOS, Windows, and Linux environments (login autostart, system reboot, sleep recovery, logging, uninstall).
 
 **Acceptance:** All three target platforms share identical ports, configurations, data directories, log formats, Web UI, and MCP capabilities.
+
+### M7: Shared Server And Default Client Mode
+
+- [x] Add `mix` mode with a rolling 24-hour in-memory scored-news cache.
+- [x] Expose shared news, source catalog, latest digest, and GitHub endpoints.
+- [x] Make new regular-user configuration default to `client` mode and the
+  shared server at `http://13.158.182.33:12301`.
+- [x] Fetch and score only client-specific RSS sources locally.
+- [x] Keep `processednews` shared-news access separate from the optional private
+  `NEWS_AGENT_LOCAL_TOKEN` local-control password.
+
+**Acceptance:** Multiple clients reuse server scoring, retain independent
+preferences and delivery settings, and never use the local control password for
+shared-news requests.
 
 ---
 

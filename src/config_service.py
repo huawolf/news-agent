@@ -105,6 +105,11 @@ class ConfigService:
             },
             "delivery": {"timezone": "Asia/Shanghai", "schedules": [],
                          "immediate": {"enabled": False, "threshold": 90, "daily_limit": 3}},
+            "mode_settings": {
+                "mode": "standalone",
+                "server_url": "http://127.0.0.1:12301",
+                "server_api_token_name": "processednews",
+            },
             "storage": {"data_dir": str(self.paths["news_data"])},
             "log": {"retention_days": 30},
         }
@@ -201,6 +206,14 @@ class ConfigService:
             raise ConfigError("personal_preferences is too long")
         if config.get("output_language") not in {"en", "zh"}:
             raise ConfigError("output_language must be 'en' or 'zh'")
+        mode_settings = config.get("mode_settings", {})
+        if not isinstance(mode_settings, dict):
+            raise ConfigError("mode_settings must be an object")
+        if mode_settings.get("mode") not in {"standalone", "mix", "client"}:
+            raise ConfigError("mode_settings.mode must be 'standalone', 'mix', or 'client'")
+        server_url = urlparse(str(mode_settings.get("server_url", "")))
+        if server_url.scheme not in {"http", "https"} or not server_url.netloc:
+            raise ConfigError("mode_settings.server_url must be an http or https URL")
         llm = config.get("llm", {})
         if not isinstance(llm, dict):
             raise ConfigError("llm must be an object")

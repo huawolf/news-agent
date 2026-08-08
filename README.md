@@ -45,6 +45,40 @@ The installer creates `.env` from `.env.example`, installs the locked runtime de
 
 ## Configure
 
+### Default Client Mode
+
+Regular users run in `client` mode by default. The shared server fetches and
+scores the common source catalog once; each client pulls the last 24 hours of
+processed entries, adds and scores only its private custom RSS feeds, then uses
+its own preferences, schedule, language, item limit, LLM, and delivery channel
+to select, summarize, and send the digest.
+
+The default connection is:
+
+```json
+"mode_settings": {
+  "mode": "client",
+  "server_url": "http://13.158.182.33:12301",
+  "server_api_token_name": "processednews"
+}
+```
+
+`processednews` is the shared-news API value and does not protect the local
+configuration page. `NEWS_AGENT_LOCAL_TOKEN` is a separate, optional private
+password used only by the local Web/configuration API. Never replace one with
+the other.
+
+The local page reads `/api/news-sources` under the optional local-control rule.
+Remote clients read `/api/server/sources` with `processednews`; these are
+separate endpoints so an unset `NEWS_AGENT_LOCAL_TOKEN` never causes the local
+page to request shared-news authentication.
+
+Operators running the shared service use `mix` mode. Mix mode performs the
+server fetch/scoring work, retains a rolling 24-hour in-memory cache, exposes
+the shared-news endpoints, and can also run its own client delivery workflow.
+Existing configurations without `mode_settings` continue in `standalone` mode
+for backward compatibility.
+
 Configure the model, endpoint, protocol, API key, and delivery webhooks in the
 **Model and delivery settings** section of the local web console. The fields
 save automatically and the model connection can be tested in place. Keep the
@@ -92,6 +126,10 @@ Important settings:
   Without an explicit schedule, deliveries default to 10:00 and 20:00 daily,
   with at most 10 news items each time.
 - `delivery.immediate`: high-score alert threshold and daily limit.
+- `mode_settings`: selects `standalone`, `mix`, or `client`. Client deployments
+  read pre-scored entries from `server_url`; mix deployments also expose the
+  rolling shared-news API. `server_api_token_name` carries the shared API value
+  `processednews`; it is unrelated to `NEWS_AGENT_LOCAL_TOKEN`.
 - `push`: enable Feishu, Discord, or a custom endpoint.
 
 ## Run
@@ -110,6 +148,16 @@ uv run news-agent service status
 
 The `serve` command starts the built-in scheduler and the local API at <http://127.0.0.1:12301>. Interactive API documentation is available at <http://127.0.0.1:12301/docs>.
 
+A shared mix server must listen on an interface reachable by its clients, for
+example:
+
+```bash
+uv run news-agent serve --host 0.0.0.0 --port 12301
+```
+
+Before exposing a mix server, set a private `NEWS_AGENT_LOCAL_TOKEN` for its
+management API. Clients still use `processednews` only for shared-news reads.
+
 To remove the login service without deleting data:
 
 ```bash
@@ -124,7 +172,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
 
 ## Local API and MCP
 
-The local API supports configuration, source, delivery, job, and log operations. Set `NEWS_AGENT_LOCAL_TOKEN` in `.env` to require the `X-News-Agent-Token` header for API requests.
+The local API supports configuration, source, delivery, job, and log operations.
+Set `NEWS_AGENT_LOCAL_TOKEN` in `.env` to protect these local management
+requests. It is not the shared server value `processednews` and is never used
+for client-to-server news retrieval.
 
 The MCP server is intended for a local agent process:
 
@@ -157,7 +208,11 @@ Use `NEWS_AGENT_DATA_DIR` or `NEWS_AGENT_CONFIG` to override these paths. Applic
 
 ## Security
 
-News Agent binds to loopback by default. Do not expose the local API to an untrusted network. Keep `.env`, webhook URLs, and API keys out of version control.
+News Agent binds to loopback by default. Regular clients should keep that
+default. A mix server may expose port `12301` for shared-news clients; protect
+its local management routes with `NEWS_AGENT_LOCAL_TOKEN` and restrict network
+access where practical. The public `processednews` value is not a management
+password. Keep `.env`, webhook URLs, and API keys out of version control.
 
 ## Contributing
 

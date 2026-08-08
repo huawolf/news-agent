@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from croniter import croniter
 
-from src.config import get_timezone, load_config, merge_sources
+from src.config import get_server_api_token, get_timezone, load_config, merge_sources
 from src.fetcher import fetch_all_feeds
 from src.llm import (
     LLMOperationError,
@@ -315,18 +315,14 @@ async def collect_entries_for_push(
     server_entries = []
     mode = config.get("mode_settings", {}).get("mode", "standalone")
 
-    if last_push_time:
-        if last_push_time.tzinfo is None:
-            last_push_time_tz = last_push_time.replace(tzinfo=tz)
-        else:
-            last_push_time_tz = last_push_time.astimezone(tz)
-        # Calculate hours elapsed since the last push
-        hours_since_last_push = int((now - last_push_time_tz).total_seconds() // 3600)
-        lookback_hours = min(24, max(1, hours_since_last_push))
-    else:
-        lookback_hours = min(24, context_days * 24)
+    # Always load the complete eligibility window. A previous delivery may omit
+    # qualified candidates, which must remain available until their 24h expiry.
+    lookback_hours = 24
 
-    print(f"📋 Last push was at: {last_push_time or 'None'}. Querying server with lookback_hours: {lookback_hours}")
+    print(
+        f"📋 Last push was at: {last_push_time or 'None'}. "
+        f"Querying server with lookback_hours: {lookback_hours}"
+    )
 
     if mode == "mix":
         try:
@@ -501,7 +497,7 @@ async def query_server_api(path: str, config: Dict, params: Optional[Dict] = Non
     import aiohttp
     settings = config.get("mode_settings", {})
     server_url = settings.get("server_url", "http://127.0.0.1:12301").rstrip("/")
-    token = settings.get("server_api_token", "") or os.environ.get("NEWS_AGENT_LOCAL_TOKEN", "")
+    token = get_server_api_token(config)
 
     headers = {}
     if token:
@@ -533,7 +529,7 @@ async def run_fetch_job(config: Dict):
         import copy
         fetch_config = copy.deepcopy(config)
         print("🔌 Running in Client Mode. Querying server for active sources...")
-        server_sources = await query_server_api("/api/news-sources", config)
+        server_sources = await query_server_api("/api/server/sources", config)
         if server_sources:
             # 1. Filter RSS sources (only keep custom feeds not on the server)
             server_rss_urls = {s.get("xmlUrl") for s in server_sources.get("rss", []) if s.get("xmlUrl")}
@@ -578,7 +574,25 @@ async def run_fetch_job(config: Dict):
 
             config = fetch_config
         else:
-            print("⚠️ Could not connect to server. Falling back to local standalone fetch.")
+            # A client outage must not silently turn into a full server workload.
+            # Keep user-added RSS feeds working, but leave shared built-in sources
+            # to the upstream server so client-side scoring costs remain bounded.
+            source_config = config.get("sources", {})
+            sources = merge_sources(
+                {
+                    **source_config,
+                    "base_opml": "",
+                    "add": source_config.get("add", []),
+                }
+            )
+            sections = fetch_config.setdefault("sections", {})
+            for section_name in ("hackernews", "google_news", "signals"):
+                sections.setdefault(section_name, {})["enabled"] = False
+            config = fetch_config
+            print(
+                "⚠️ Could not connect to server. Fetching only user-added "
+                f"RSS sources locally ({len(sources)} configured)."
+            )
 
     interval = config["schedule"]["fetch_interval_minutes"]
     lookback = config["schedule"].get("fetch_lookback_minutes", 1440)

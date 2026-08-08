@@ -200,13 +200,13 @@ def format_recent_push_summary_context(raw_text: str) -> str:
         title = re.sub(r"^\d+\.\s*", "", heading_line).strip()
 
         body_text = "\n".join(lines[1:]).strip()
-        link_match = re.search(
-            r"\[(?:查看原文|Read original|原文链接)\]\((https?://[^\s\)]+)\)", body_text
+        links = re.findall(
+            r"\[(?:查看原文|Read original|原文链接)\s*\d*\]\((https?://[^\s\)]+)\)", body_text
         )
-        link = link_match.group(1) if link_match else ""
+        link = ", ".join(links) if links else ""
 
         clean_summary = re.sub(
-            r"\[(?:查看原文|Read original|原文链接)\]\([^\s\)]+\)", "", body_text
+            r"\[(?:查看原文|Read original|原文链接)\s*\d*\]\([^\s\)]+\)", "", body_text
         ).strip()
         clean_summary = " ".join(clean_summary.split())
 

@@ -8,7 +8,7 @@ Welcome to the News Agent documentation index. This directory contains architect
 
 | Document | Description |
 |---|---|
-| 📐 [system-architecture.md](system-architecture.md) | High-level system architecture, service layer design, local Web/API & MCP protocols, data contracts, and security boundaries. |
+| 📐 [system-architecture.md](system-architecture.md) | High-level system architecture, default client and mix-server modes, local Web/API & MCP protocols, data contracts, and security boundaries. |
 | 🗺️ [roadmap.md](roadmap.md) | Technical implementation roadmap, milestone progress (M1–M6), acceptance criteria, and Architectural Decision Records (ADRs). |
 | 📦 [archive/](archive/) | Historical design specifications and legacy deployment docs (e.g., legacy Linux systemd/journald timer setup). |
 
