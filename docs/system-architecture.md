@@ -73,9 +73,9 @@ To optimize LLM token usage and reduce cost across multiple deployments, the sys
   Configurations without `mode_settings` receive the regular-user client
   defaults.
 - **Mix Mode:** Acts as both a Server and a Client:
-  - **Server Responsibilities:** Periodically fetches and scores configured RSS and signal sources, maintains a rolling 24-hour in-memory cache of scored entries, and exposes the `GET /api/server/news` REST API endpoint.
-  - **Client Responsibilities:** Runs push schedules locally, merging cache data with client-side custom feeds before sending.
-- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours and the pre-compiled GitHub section. This unified client behavior ignores the local `sections.github_trending.enabled` flag and per-schedule section selection; those controls remain applicable to standalone and mix modes. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
+  - **Server Responsibilities:** On every full run, fetches and scores every enabled news source, refreshes GitHub Trending, maintains a rolling 24-hour in-memory news cache plus the latest successful GitHub cache, and exposes the shared REST endpoints.
+  - **Delivery Responsibilities:** Uses the same unified news and GitHub pipeline for its own manual and scheduled deliveries; schedules select only time and final news count.
+- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours and the pre-compiled GitHub section. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
   Every delivery query requests the complete rolling 24-hour eligibility window;
   local sent history removes delivered URLs. If the server is unavailable, the
   client may continue fetching user-added RSS feeds but must not fall back to
@@ -110,6 +110,7 @@ news-agent/
   config.json
   .env
   news-data/
+    github-latest.md
   logs/
     app.log
     fetch.log
@@ -120,7 +121,7 @@ news-agent/
   runs/
 ```
 
-- `news-data/`: Retains data files (`fetch-*.json`, `push-*.md`, `notify-*.md`, and `sent-history.json`), automatically cleaned up after 30 days (`keep_days: 30`).
+- `news-data/`: Retains data files (`fetch-*.json`, `push-*.md`, `notify-*.md`, `sent-history.json`, and the persistent `github-latest.md` cache), with dated artifacts automatically cleaned up after 30 days (`keep_days: 30`).
 - `runs/`: Stores structured JSON job execution summaries and statuses.
 
 ### 3.2 Configuration Schema Evolution
@@ -140,22 +141,28 @@ Top-level configuration schema with backward compatibility:
     "timezone": "Asia/Shanghai",
     "schedules": [
       {
-        "id": "morning",
+        "id": "delivery-1",
         "cron": "0 10 * * *",
-        "max_items": 10,
-        "sections": ["rss", "github", "hackernews", "insights"]
+        "max_items": 10
       },
       {
-        "id": "evening",
+        "id": "delivery-2",
         "cron": "0 20 * * *",
-        "max_items": 10,
-        "sections": ["rss"]
+        "max_items": 10
       }
     ],
     "immediate": {"enabled": false, "threshold": 92, "daily_limit": 3}
   }
 }
 ```
+
+Delivery schedules control only timing and the final news item limit. Manual
+and scheduled runs always use the same unified pipeline: all enabled collection
+sources feed one scored news pool, GitHub is generated alongside it, and
+insights provide digest metadata rather than a separately selectable section.
+Mix and standalone servers persist the latest successful GitHub section in
+`news-data/github-latest.md`; the shared GitHub API reads this cache so an empty
+incremental GitHub result cannot erase the last successful content.
 
 `llm.protocol` supports `openai_chat`, `openai_responses`, and
 `anthropic_messages`. Protocol detection first examines the endpoint path:
@@ -174,12 +181,13 @@ defaults to daily deliveries at 10:00 and 20:00 in `delivery.timezone`, with a
 maximum of 10 news items per delivery. Explicit schedules, including an empty
 schedule list used to disable automatic delivery, are preserved.
 
-`delivery.schedules[].max_items` caps one combined headline list containing RSS
-and Hacker News items (10 by default). Hacker News is not exposed as a separate
-delivery or Web UI section. GitHub is independently capped by
+`delivery.schedules[].max_items` caps one combined headline list containing all
+news source types (10 by default). RSS, Hacker News, Google News, and signal
+adapters are inputs to this pool, not separately selectable delivery sections.
+GitHub is independently capped by
 `sections.github_trending.max_items` (3 by default) and starts numbering at 1.
-Each item consists of a title and concise core summary. Metadata and the insights
-section are used for the card title/preview only and are never sent as body text.
+Each item consists of a title and concise core summary. Insights enrich card
+metadata and are not a separately selectable or delivered body section.
 The fixed delivery-title prefix follows the generated title language, preventing
 mixed Chinese/English card titles when a model deviates from the requested language.
 
@@ -273,10 +281,10 @@ final_score = base_llm_score
             - duplicate_penalty
 ```
 
-Final RSS and Hacker News headlines are combined and truncated according to the
-`max_items` parameter of the active schedule. GitHub is truncated independently.
-Hacker News stories enter the same fetch, LLM scoring, ranking, and digest path as
-all other news; the scheduled delivery does not run a second Hacker News summary.
+All news entries are combined and truncated according to the `max_items`
+parameter of the active schedule. GitHub is truncated independently. Hacker
+News and every other adapter enter the same fetch, LLM scoring, ranking, and
+digest path; no source type gets a second delivery summary.
 The digest receives up to three times the target item count from the ranked pool.
 Its prompt gives equal editorial priority to actionable public-equity news,
 evidence-backed startup opportunities, and major AI/technology advances. When the
@@ -304,6 +312,12 @@ candidate-pool, and final-limit counts for each run.
 
 GitHub repositories processed or sent by the system are recorded in `news-data/trending-history.json`. To enforce strict permanent deduplication ("historically sent repositories are never re-sent"), repository URLs are normalized (lowercased and stripped of trailing slashes) and entries are preserved indefinitely without time-based pruning (`keep_days` cleanup bypass).
 
+Mix and standalone modes persist each non-empty generated GitHub section to
+`news-data/github-latest.md`. An empty incremental result never overwrites this
+file. On first startup after upgrading, the cache bootstraps by scanning recent
+push files for the latest non-empty GitHub sentinel section. The shared GitHub
+endpoint reads this persistent cache before using legacy push-file fallback.
+
 ---
 
 ## 5. Scheduling and Job Execution
@@ -319,9 +333,21 @@ Powered by `APScheduler`:
 
 ```text
 Scheduler / Web / Local API / MCP
-              -> submit(fetch | push | preview)
+              -> submit(fetch | push | preview | run)
               -> Lock acquisition, Run record generation, Logging, Execution
 ```
+
+`run` always executes one complete cycle:
+
+```text
+all enabled news sources -> one scored news pool
+GitHub Trending          -> latest successful GitHub cache
+news pool + GitHub       -> unified selection, metadata, and delivery
+```
+
+There is no morning/evening content branch. `fetch` and `push` remain available
+as lower-level operational jobs, while the Web console's Run action uses the
+complete `run` cycle.
 
 - **Concurrency Control:** Mutex locks prevent concurrent runs of the same job type (returning active Job ID on collision).
 - **Job Tracking:** Each job records `id`, `kind`, `source`, start/finish timestamps, execution status, and output summary.
@@ -382,7 +408,7 @@ Scheduler / Web / Local API / MCP
 | `GET` | `/api/server/news` | Pull pre-scored news within a specified time window (up to 24h) |
 | `GET` | `/api/server/sources` | Pull the shared server source catalog used for client-side filtering |
 | `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
-| `GET` | `/api/server/github-trending` | Pull the latest pre-compiled GitHub Trending section Markdown |
+| `GET` | `/api/server/github-trending` | Pull the latest successful cached GitHub Trending section Markdown |
 
 Authentication is intentionally split:
 

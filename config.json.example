@@ -24,14 +24,12 @@
             {
                 "id": "morning",
                 "cron": "0 10 * * *",
-                "max_items": 10,
-                "sections": ["rss", "github", "hackernews", "insights"]
+                "max_items": 10
             },
             {
                 "id": "evening",
                 "cron": "0 20 * * *",
-                "max_items": 10,
-                "sections": ["rss"]
+                "max_items": 10
             }
         ],
         "immediate": {

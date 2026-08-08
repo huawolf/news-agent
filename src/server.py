@@ -161,7 +161,7 @@ function readScheduleRows(){return [...document.querySelectorAll('.schedule-row'
 function renderSchedules(items){$('scheduleTitle').textContent=`${t('schedule')} (${items.length})`;$('scheduleRows').innerHTML=items.map(item=>`<div class="schedule-row"><div><label>${t('weekdays')}</label><div class="days">${weekdays().map(([n,en,zh])=>`<label><input data-day type="checkbox" value="${n}" ${item.days.includes(n)?'checked':''}>${lang==='zh'?zh:en}</label>`).join('')}</div></div><div><label>${t('time')}</label><input data-time type="time" value="${item.time||'10:00'}"></div><div><label>${t('maxItems')}</label><input data-max type="number" min="1" max="50" value="${item.max_items||10}"></div><button class="secondary danger" onclick="this.parentElement.remove()">${t('remove')}</button></div>`).join('')}
 function addSchedule(){renderSchedules([...readScheduleRows(),{days:[1,2,3,4,5,6,7],time:'10:00',max_items:10}])}
 function parseSchedule(item){let p=(item.cron||'0 10 * * *').split(/\\s+/),d=p[4]||'*',days=d==='*'?[1,2,3,4,5,6,7]:d.split(',').map(x=>x==='0'?7:Number(x)).filter(x=>x>=1&&x<=7);return{days,time:`${String(p[1]||10).padStart(2,'0')}:${String(p[0]||0).padStart(2,'0')}`,max_items:item.max_items||10}}
-async function saveSchedule(){let rows=readScheduleRows();if(rows.some(x=>!x.days.length)){alert('Choose at least one weekday.');return}let schedules=rows.map((x,i)=>{let [h,m]=x.time.split(':');let days=x.days.map(d=>d===7?0:d).join(',');return{id:`delivery-${i+1}`,cron:`${m} ${h} * * ${days}`,max_items:x.max_items,sections:['rss','github','hackernews','insights']}});await api('/api/delivery',{method:'PUT',body:JSON.stringify({value:{timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',schedules}})});alert(t('saved'));load()}
+async function saveSchedule(){let rows=readScheduleRows();if(rows.some(x=>!x.days.length)){alert('Choose at least one weekday.');return}let schedules=rows.map((x,i)=>{let [h,m]=x.time.split(':');let days=x.days.map(d=>d===7?0:d).join(',');return{id:`delivery-${i+1}`,cron:`${m} ${h} * * ${days}`,max_items:x.max_items}});await api('/api/delivery',{method:'PUT',body:JSON.stringify({value:{timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',schedules}})});alert(t('saved'));load()}
 function updateRunButton(runningId){currentRunJobId=runningId||null;let b=$('runButton');if(!b)return;b.textContent=currentRunJobId?t('stop'):t('run');b.classList.toggle('danger',!!currentRunJobId);$('runState').textContent=currentRunJobId?t('runningJob'):t('idleJob')}
 function envDisplayName(v,c){return v.name===(c.llm.apiKeyName||'')?t('modelApiKey'):v.name}
 function envFieldHtml(v,c){let req=v.name===(c.llm.apiKeyName||'');return `<label>${escapeHtml(envDisplayName(v,c))}${req?' <span class="missing">*</span>':''} <span data-env-state class="${v.configured?'configured':'missing'}">${v.configured?t('configured'):t('missing')}</span><input type="text" data-env="${v.name}" value="${escapeHtml(v.value)}" ${req?'required':''} autocomplete="off" oninput="scheduleConnectionAutoSave()"></label>`}
@@ -279,6 +279,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Server github-trending API is only available on standalone or mix mode servers")
 
         data_dir = config.get("storage", {}).get("data_dir", "news-data")
+        from src.storage import load_github_cache
+        cached = load_github_cache(data_dir)
+        if cached:
+            return {"found": True, "github": cached}
+
         latest = get_last_push_file(data_dir)
         if not latest:
             return {"found": False}

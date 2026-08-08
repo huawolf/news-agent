@@ -1,6 +1,6 @@
 # News Agent
 
-News Agent is a local, personal news service. It collects RSS feeds, built-in signal sources, GitHub Trending, and Hacker News, uses an OpenAI-compatible LLM to rank and summarize items, and delivers digests to Feishu or Discord.
+News Agent is a local, personal news service. It collects RSS feeds, Hacker News, and built-in signal sources into one scored news pool, adds a GitHub Trending digest, and uses an OpenAI-compatible LLM to rank, summarize, and deliver to Feishu or Discord.
 
 It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio MCP server all manage the same configuration and jobs.
 
@@ -8,7 +8,7 @@ It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio M
 
 ## Features
 
-- Aggregate RSS feeds, GitHub Trending, Hacker News, Product Hunt, Reddit, App Store new apps, V2EX, 36Kr, Sspai, OSChina, Jike topics, and other built-in signal sources.
+- Aggregate RSS feeds, Hacker News, Product Hunt, Reddit, App Store new apps, V2EX, 36Kr, Sspai, OSChina, Jike topics, and other built-in sources into one news pool, with GitHub Trending generated alongside it.
 - Rank, filter, deduplicate, and summarize content with an LLM.
 - Add, update, verify, and remove RSS sources from the web console, API, or MCP.
 - Set interests, exclusions, source weights, delivery times, and item limits.
@@ -49,9 +49,9 @@ The installer creates `.env` from `.env.example`, installs the locked runtime de
 
 Regular users run in `client` mode by default. The shared server fetches and
 scores the common source catalog once; each client pulls the last 24 hours of
-processed entries, adds and scores only its private custom RSS feeds, then uses
-its own preferences, schedule, language, item limit, LLM, and delivery channel
-to select, summarize, and send the digest.
+processed entries plus the latest successful GitHub digest, adds and scores only
+its private custom RSS feeds, then uses its own preferences, schedule, language,
+item limit, LLM, and delivery channel to select, summarize, and send the digest.
 
 The default connection is:
 
@@ -75,7 +75,9 @@ page to request shared-news authentication.
 
 Operators running the shared service use `mix` mode. Mix mode performs the
 server fetch/scoring work, retains a rolling 24-hour in-memory cache, exposes
-the shared-news endpoints, and can also run its own client delivery workflow.
+the shared-news endpoints, and can also run its own delivery workflow. Manual
+and scheduled runs both process the full enabled source set and GitHub; delivery
+schedules control only time and final news count.
 Configurations without `mode_settings` receive the same regular-user `client`
 defaults. Set `standalone` or `mix` explicitly only for self-hosted operation.
 
@@ -122,7 +124,7 @@ Important settings:
 - `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
 - `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
 - `log.retention_days`: number of daily log directories to retain; defaults to 30 days.
-- `delivery.schedules`: cron schedules, sections, and the combined RSS/Hacker News `max_items` limit per delivery. GitHub uses its own section limit.
+- `delivery.schedules`: cron schedules and the unified news `max_items` limit per delivery. Every run processes the full news source pool and GitHub; sources are not selected per schedule.
   Without an explicit schedule, deliveries default to 10:00 and 20:00 daily,
   with at most 10 news items each time.
 - `delivery.immediate`: high-score alert threshold and daily limit.
@@ -205,6 +207,9 @@ Runtime data is stored in the project directory by default:
 | Job records | `runs/` |
 
 Use `NEWS_AGENT_DATA_DIR` or `NEWS_AGENT_CONFIG` to override these paths. Application logs use rotating files; the project does not depend on system journals.
+Mix and standalone servers keep the latest successful GitHub section at
+`news-data/github-latest.md`; shared clients read it through
+`/api/server/github-trending`.
 
 ## Security
 

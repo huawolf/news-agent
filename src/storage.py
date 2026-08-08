@@ -32,6 +32,42 @@ def get_notify_file(d: date = None, data_dir: str = "news-data") -> str:
     return f"{data_dir}/notify-{d.isoformat()}.md"
 
 
+def get_github_cache_file(data_dir: str = "news-data") -> str:
+    """Return the persistent latest successful GitHub section path."""
+    return f"{data_dir}/github-latest.md"
+
+
+def save_github_cache(content: str, data_dir: str = "news-data") -> None:
+    """Persist the latest non-empty GitHub section for shared clients."""
+    clean = str(content or "").strip()
+    if not clean:
+        return
+    path = Path(get_github_cache_file(data_dir))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(clean + "\n", encoding="utf-8")
+
+
+def load_github_cache(data_dir: str = "news-data") -> str:
+    """Load or bootstrap the latest successful GitHub section."""
+    path = Path(get_github_cache_file(data_dir))
+    if path.exists():
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+
+    data_path = Path(data_dir)
+    for push_file in sorted(data_path.glob("push-*.md"), reverse=True):
+        try:
+            _, body = parse_frontmatter(
+                push_file.read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError:
+            continue
+        github = extract_section(body, "github").strip()
+        if github:
+            save_github_cache(github, data_dir=data_dir)
+            return github
+    return ""
+
+
 def save_notify_file(
     filepath: str,
     content: str,

@@ -6,7 +6,7 @@
 
 ## Current Baseline
 
-- **Implemented:** RSS fetching, built-in signal adapters, LLM scoring, keyword deduplication, immediate push notifications, RSS / GitHub Trending / Hacker News / Insights sections, Feishu / Discord / custom webhook integration.
+- **Implemented:** A unified news pool fed by RSS, Hacker News, and built-in signal adapters; GitHub Trending generation; LLM scoring, keyword deduplication, immediate push notifications, and Feishu / Discord / custom webhook integration.
 - **Implemented:** Dynamic RSS feed addition/blocking in `config.json`, file persistence in `news-data/` (JSON/Markdown).
 - **Archived:** Legacy Linux `systemd timer` and `journald` deployment archived; replaced by cross-platform daemon architecture.
 - **Completed:** Local Web/API, stdio MCP server, natural language preference ranking, built-in APScheduler, rolling file logger, macOS/Windows service lifecycle management.
@@ -79,7 +79,7 @@
 - [x] Implement topic inclusion/exclusion, source weighting, language preferences, and diversity limits.
 - [x] Calibrate LLM scoring so actionable stock-investment news, evidence-backed startup opportunities, and major AI advances have equal priority.
 - [x] Limit Feishu scoring alerts to LLM connection failures and timeouts while retaining all processing errors in local logs.
-- [x] Combine RSS and Hacker News into one headline list capped at 10, while keeping GitHub separately numbered and capped at 3.
+- [x] Combine every news source type into one headline list capped by the active schedule, while keeping GitHub separately numbered and capped.
 - [x] Strip metadata from outgoing message bodies.
 - [x] Use a 3x ranked candidate pool, fill undersized digests, and mark only links actually present in delivered content as sent.
 - [x] Preserve and number all original links when one digest headline combines multiple reports.
@@ -107,6 +107,8 @@
 
 - **Completed:** Client fetch isolation now restricts local collection to `sources.add` and unconditionally disables all built-in adapters, including GitHub enrichment and shared-server outage paths.
 - **Completed:** Every client delivery uses the unified server news and GitHub flow, independent of the local GitHub enabled flag or schedule section list.
+- **Completed:** Manual and scheduled deliveries now share one full news and GitHub pipeline; per-schedule RSS/Hacker News/insights section selection has been removed.
+- **Completed:** Mix and standalone servers retain the latest successful GitHub section independently of push files for shared clients.
 - **Completed:** Web-triggered job output is line-buffered so active fetch and push progress is visible before job completion.
 
 - [x] Add `mix` mode with a rolling 24-hour in-memory scored-news cache.
@@ -121,7 +123,8 @@
 
 **Acceptance:** Multiple clients reuse server scoring, retain independent
 preferences and delivery settings, and never use the local control password for
-shared-news requests.
+shared-news requests. Every manual or scheduled server run processes the full
+news pool and GitHub; schedule configuration contains no source-section switch.
 
 ---
 

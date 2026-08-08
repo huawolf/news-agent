@@ -30,13 +30,11 @@ DEFAULT_DELIVERY_SCHEDULES = (
         "id": "morning",
         "cron": "0 10 * * *",
         "max_items": 10,
-        "sections": ["rss", "github", "hackernews", "insights"],
     },
     {
         "id": "evening",
         "cron": "0 20 * * *",
         "max_items": 10,
-        "sections": ["rss"],
     },
 )
 
@@ -172,12 +170,13 @@ class ConfigService:
             old = config.get("schedule", {}).get("push_cron", [])
             delivery["schedules"] = [
                 {"id": "morning" if index == 0 else f"push-{index + 1}", "cron": cron,
-                 "max_items": 10,
-                 "sections": ["rss", "github", "hackernews", "insights"] if index == 0 else ["rss"]}
+                 "max_items": 10}
                 for index, cron in enumerate(old)
             ]
         elif not has_delivery_schedules and not has_legacy_push_cron:
             delivery["schedules"] = copy.deepcopy(list(DEFAULT_DELIVERY_SCHEDULES))
+        for schedule in delivery.get("schedules", []):
+            schedule.pop("sections", None)
         config["preferences"].setdefault("interests", [])
         config["preferences"].setdefault("avoid", [])
         if not has_personal_preferences:
@@ -360,6 +359,8 @@ class ConfigService:
 
     def _write(self, config: dict) -> None:
         config = copy.deepcopy(config)
+        for schedule in config.get("delivery", {}).get("schedules", []):
+            schedule.pop("sections", None)
         if isinstance(config.get("llm"), dict):
             config["llm"].pop("output_language", None)
             config["llm"].pop("personal_preferences", None)

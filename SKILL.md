@@ -82,9 +82,10 @@ is explicitly operating the shared server:
 ```
 
 Use `mix` only for the shared server operator. Use `standalone` only for an
-explicit self-contained deployment or backward-compatible existing setup.
+explicit self-contained deployment.
 Client mode retrieves the shared scored pool and locally fetches/scores only
-custom RSS feeds absent from the server catalog.
+custom RSS feeds absent from the server catalog. Manual and scheduled runs use
+the same pipeline: one unified news pool plus the server-provided GitHub digest.
 
 When starting a mix server for remote clients, bind it to an appropriate
 network interface, for example `news-agent serve --host 0.0.0.0 --port 12301`,
@@ -99,9 +100,9 @@ Obtain these values before configuring:
 3. Output language: `zh` or `en`.
 4. Natural-language ranking preferences.
 5. Delivery destination and its webhook or token.
-6. IANA timezone, cron schedules, sections, and `max_items` for each delivery.
+6. IANA timezone, cron schedules, and `max_items` for each delivery.
 
-Explain that `max_items` is the final delivery count. The RSS digest stage ranks
+Explain that `max_items` is the final news delivery count. The unified digest stage ranks
 all eligible fresh entries, gives up to `max_items * 3` leading candidates to the
 LLM, and asks it to compose at most `max_items` items.
 
@@ -218,10 +219,9 @@ to preserve it unless the user asks to change it.
     "timezone": "Asia/Shanghai",
     "schedules": [
       {
-        "id": "morning",
+        "id": "delivery-1",
         "cron": "0 10 * * *",
-        "max_items": 5,
-        "sections": ["rss", "github", "hackernews", "insights"]
+        "max_items": 5
       }
     ]
   }
@@ -253,6 +253,13 @@ job to completion. Reconfirm the destination immediately before this call.
 Use `POST /api/jobs/run?confirm=true` only when the user explicitly requests one
 combined fetch-and-send operation. Never infer confirmation from an earlier
 configuration request.
+
+For a mix server, a successful full run must update the shared news pool and
+attempt GitHub generation regardless of the run time. Verify `app.log` contains
+`GH:` progress, inspect `news-data/github-latest.md`, and require
+`GET /api/server/github-trending` to return non-empty `github` before declaring
+the shared GitHub service healthy. Delivery schedule objects must contain only
+`id`, `cron`, and `max_items`; do not add legacy `sections` arrays.
 
 ## 9. MCP Handoff
 

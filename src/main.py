@@ -40,6 +40,7 @@ from src.storage import (
     assemble_with_sentinels,
     cleanup_old_files,
     get_fetch_file,
+    load_github_cache,
     get_notify_file,
     get_push_file,
     load_existing_links,
@@ -49,6 +50,7 @@ from src.storage import (
     load_recent_push_content,
     read_entries,
     save_notify_file,
+    save_github_cache,
     save_push_file,
     load_sent_links,
     mark_links_as_sent,
@@ -116,14 +118,6 @@ def _delivery_title(config: Dict, title: str) -> str:
 
 
 def _default_digest_title(config: Dict, date_str: str) -> str:
-    return (
-        f"🌙 News Agent Evening Brief | {date_str}"
-        if _is_english_output(config)
-        else f"🌙 News Agent 晚报 | {date_str}"
-    )
-
-
-def _default_morning_title(config: Dict, date_str: str) -> str:
     return (
         f"📰 News Agent Daily Brief | {date_str}"
         if _is_english_output(config)
@@ -256,28 +250,6 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
             
     if duplicate_count > 0:
         print(f"🚫 Keyword deduplication blocked {duplicate_count} entries by setting score to 0")
-
-
-def is_morning_push(now: datetime, config: Dict) -> bool:
-    """Return whether the current push is the morning brief.
-
-    The closest cron in `schedule.push_cron` is treated as the active schedule.
-    If that cron is the earliest cron for the day, it is a morning brief.
-
-    Special cases:
-    - Empty `push_cron` means no morning brief.
-    - A single `push_cron` is both earliest and closest, so it is a morning brief.
-    """
-    cron_list = config.get("schedule", {}).get("push_cron", [])
-    if not cron_list:
-        return False
-    if len(cron_list) == 1:
-        return True
-
-    base = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_fires = [croniter(c, base).get_next(datetime) for c in cron_list]
-    closest = min(today_fires, key=lambda f: abs(now - f))
-    return closest == min(today_fires)
 
 
 async def collect_entries_for_push(
@@ -819,99 +791,11 @@ async def run_push_job(config: Dict):
             print("⚠️ Failed to retrieve pre-compiled digest from server")
         return
 
-    policy = active_delivery_schedule(config, now_local(config))
-    use_extended_sections = bool(policy.get("sections")) and any(
-        section != "rss" for section in policy["sections"]
-    )
-    if mode == "client" or use_extended_sections or (not policy and is_morning_push(now_local(config), config)):
-        await _run_morning_push(config)
-    else:
-        await _run_default_push(config)
+    await _run_unified_push(config)
 
 
-async def _run_default_push(config: Dict):
-    """Run the default RSS-only digest flow for evening or non-morning schedules."""
-    now = now_local(config)
-    policy = active_delivery_schedule(config, now)
-    rss_md, metadata, rss_err = await run_rss_section(config, now, max_items=policy.get("max_items"))
-
-    if rss_err and not rss_md:
-        print(f"⚠️ [compose_digest] {rss_err}")
-        await notify_llm_errors("compose_digest", [rss_err], config)
-        raise RuntimeError(f"RSS section failed: {rss_err}")
-
-    if not rss_md:
-        # run_rss_section already logs when there are no new RSS entries.
-        return
-
-    # Metadata fallback for missing frontmatter or parse failures.
-    if not metadata:
-        date_str = now.strftime("%Y-%m-%d")
-        metadata = {
-            "title": _default_digest_title(config, date_str),
-            "lead": "",
-            "highlights": [],
-            "profile": "default",
-            "date": date_str,
-        }
-    metadata.setdefault("pushTime", now.isoformat())
-
-    delivery_sections = limit_delivery_items(
-        {"rss": rss_md}, policy.get("max_items", 10)
-    )
-    delivery_md = delivery_sections.get("rss", "")
-    if not delivery_md:
-        print("ℹ️ RSS output contains no valid news items; skipping delivery")
-        return
-
-    await send_to_platforms(
-        delivery_md,
-        config["push"],
-        title=_delivery_title(config, metadata["title"]),
-        metadata=metadata,
-    )
-    data_dir = config.get("storage", {}).get("data_dir", "news-data")
-    last_push_file = get_last_push_file(data_dir)
-    last_push_time = extract_push_time(last_push_file) if last_push_file else None
-
-    push_file = get_push_file(data_dir=data_dir)
-    rss_count = delivery_md.count("###")
-    save_push_file(
-        push_file,
-        delivery_md,
-        rss_count,
-        rss_count,
-        profile="default",
-        metadata=metadata,
-    )
-    print(f"💾 Saved to {push_file}")
-    
-    # Record sent history.
-    try:
-        min_score = config["filter"]["min_score"]
-        context_days = config["filter"]["context_days"]
-        data_dir = config.get("storage", {}).get("data_dir", "news-data")
-        to_push, _ = await collect_entries_for_push(
-            last_push_time=last_push_time,
-            context_days=context_days,
-            min_score=min_score,
-            data_dir=data_dir,
-            preferences=config.get("preferences"),
-            max_items=None,
-            config=config,
-        )
-        sent_links = links_present_in_content(to_push, delivery_md)
-        mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 Recorded {len(sent_links)} actually delivered digest links")
-    except Exception as e:
-        print(f"⚠️ Failed to record sent history: {e}")
-
-    print(f"✅ Push job completed | delivered entries: {rss_count}")
-
-
-
-async def _run_morning_push(config: Dict):
-    """Run the morning news, GitHub, and metadata workflow.
+async def _run_unified_push(config: Dict):
+    """Run the unified news, GitHub, and metadata workflow.
 
     RSS (which already includes Hacker News entries) and GitHub run concurrently.
     Insights then generates delivery metadata before the sections are assembled.
@@ -928,10 +812,19 @@ async def _run_morning_push(config: Dict):
         run_github_section(config, now),
     )
 
-    # In morning briefs, insights usually overrides digest metadata.
+    # Insights enriches the unified digest metadata.
     # Keep digest metadata as fallback if insights fails.
     rss_md, digest_meta, rss_err = rss_result
     gh_md, gh_err = gh_result
+
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    mode = config.get("mode_settings", {}).get("mode", "client")
+    if gh_md and mode in {"standalone", "mix"}:
+        save_github_cache(gh_md, data_dir=data_dir)
+    elif not gh_md and mode in {"standalone", "mix"}:
+        gh_md = load_github_cache(data_dir=data_dir)
+        if gh_md:
+            print("📋 Reusing latest successful GitHub section from server cache")
 
     if gh_err:
         print(f"⚠️ [section_github] {gh_err}")
@@ -954,7 +847,7 @@ async def _run_morning_push(config: Dict):
         fallback = digest_meta or {}
         digest_title = fallback.get("title", "")
 
-        title = digest_title if digest_title else _default_morning_title(config, date_str)
+        title = digest_title if digest_title else _default_digest_title(config, date_str)
         metadata = {
             "date": date_str,
             "pushTime": now.isoformat(),
@@ -964,10 +857,11 @@ async def _run_morning_push(config: Dict):
             "seodescription": "",
             "lead": fallback.get("lead", ""),
             "highlights": fallback.get("highlights", []),
-            "profile": "morning",
+            "profile": "default",
         }
     else:
         metadata.setdefault("pushTime", now.isoformat())
+        metadata["profile"] = "default"
 
     delivery_sections = limit_delivery_items(
         {
@@ -991,7 +885,6 @@ async def _run_morning_push(config: Dict):
         title=_delivery_title(config, metadata["title"]),
         metadata=metadata,
     )
-    data_dir = config.get("storage", {}).get("data_dir", "news-data")
     last_push_file = get_last_push_file(data_dir)
     last_push_time = extract_push_time(last_push_file) if last_push_file else None
 
@@ -999,9 +892,9 @@ async def _run_morning_push(config: Dict):
     rss_count = delivery_sections.get("rss", "").count("###")
     delivered_count = sum(body.count("###") for body in delivery_sections.values())
     save_push_file(
-        push_file, final, rss_count, delivered_count, profile="morning", metadata=metadata
+        push_file, final, rss_count, delivered_count, profile="default", metadata=metadata
     )
-    print(f"💾 Saved morning brief to {push_file}")
+    print(f"💾 Saved unified digest to {push_file}")
     
     # Record sent history.
     try:
