@@ -55,14 +55,22 @@ def load_config(config_path: str = "config.json") -> Dict:
     )
     config["llm"]["personal_preferences"] = config["personal_preferences"]
 
+    # Server-Client mode settings
+    mode_settings = config.setdefault("mode_settings", {})
+    mode_settings.setdefault("mode", "standalone")
+    mode_settings.setdefault("server_url", "http://127.0.0.1:12301")
+    mode_settings.setdefault("server_api_token", "processednews")
+
     return config
 
 
 
 def parse_opml(opml_path: str) -> List[Dict]:
     """解析OPML文件获取订阅源列表"""
+    if not opml_path or not str(opml_path).strip():
+        return []
     path = Path(opml_path)
-    if not path.exists():
+    if not path.exists() or path.is_dir():
         return []
 
     tree = ET.parse(path)

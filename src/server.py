@@ -198,6 +198,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        config = service.load()
+        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        if mode in ("standalone", "mix"):
+            from src.server_cache import server_news_cache
+            data_dir = config.get("storage", {}).get("data_dir", "news-data")
+            server_news_cache.initialize(data_dir, config)
         scheduler.start()
         watcher = asyncio.create_task(scheduler.watch_config())
         try:
@@ -219,6 +225,42 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/status", dependencies=[Depends(require_token)])
     async def status() -> dict:
         return {"status": "running", "config_path": str(service.config_path), "jobs": jobs.status(), "schedules": scheduler.state()}
+
+    @app.get("/api/server/news", dependencies=[Depends(require_token)])
+    async def get_server_news(hours: int = 24) -> list[dict]:
+        config = service.load()
+        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        if mode not in ("standalone", "mix"):
+            raise HTTPException(status_code=400, detail="Server news API is only available on standalone or mix mode servers")
+
+        from src.server_cache import server_news_cache
+        return server_news_cache.get_news(hours, config)
+
+    @app.get("/api/server/latest-digest", dependencies=[Depends(require_token)])
+    async def get_server_latest_digest() -> dict:
+        config = service.load()
+        mode = config.get("mode_settings", {}).get("mode", "standalone")
+        if mode not in ("standalone", "mix"):
+            raise HTTPException(status_code=400, detail="Server latest-digest API is only available on standalone or mix mode servers")
+
+        data_dir = config.get("storage", {}).get("data_dir", "news-data")
+        latest = get_last_push_file(data_dir)
+        if not latest:
+            return {"found": False}
+
+        path = Path(latest)
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+            metadata, body = parse_frontmatter(content)
+            title = metadata.get("title", "")
+            return {
+                "found": True,
+                "title": title,
+                "content": body,
+                "metadata": metadata
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to read latest push file: {exc}") from exc
 
     @app.get("/api/config", dependencies=[Depends(require_token)])
     async def get_config() -> dict:

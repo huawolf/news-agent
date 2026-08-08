@@ -43,6 +43,7 @@ from src.storage import (
     get_notify_file,
     get_push_file,
     load_existing_links,
+    format_recent_push_summary_context,
     limit_delivery_items,
     load_recent_notify_content,
     load_recent_push_content,
@@ -208,6 +209,7 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
     tz = get_timezone(config)
     now = datetime.now(tz)
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    threshold = config.get("filter", {}).get("keyword_overlap_threshold", 3)
     
     history_entries = []
     for i in range(3):
@@ -219,7 +221,7 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
                 if entry.get("keywords") and entry.get("score", 0) > 0:
                     history_entries.append(entry)
                     
-    print(f"🔍 Keyword deduplication: loaded {len(history_entries)} historical entries from the last 3 days")
+    print(f"🔍 Keyword deduplication: loaded {len(history_entries)} historical entries from the last 3 days (threshold={threshold})")
     
     if not history_entries:
         return
@@ -239,7 +241,7 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
                 continue
                 
             overlap = count_overlapping_keywords(new_keywords, hist_keywords)
-            if overlap >= 5:
+            if overlap >= threshold:
                 is_dup = True
                 matching_history_title = hist_entry.get("title", "")
                 matching_history_link = hist_entry.get("link", "")
@@ -248,7 +250,7 @@ def deduplicate_by_keywords(new_entries: List[Dict], config: Dict):
         if is_dup:
             new_entry["score"] = 0
             new_entry["is_duplicate"] = True
-            new_entry["duplicate_reason"] = f"Keyword overlap >= 5 with historical news '{matching_history_title}' ({matching_history_link})"
+            new_entry["duplicate_reason"] = f"Keyword overlap >= {threshold} with historical news '{matching_history_title}' ({matching_history_link})"
             duplicate_count += 1
             print(f"🚫 Keyword duplicate detected: '{new_entry.get('title')}' overlaps with sent news '{matching_history_title}'")
             
@@ -278,39 +280,90 @@ def is_morning_push(now: datetime, config: Dict) -> bool:
     return closest == min(today_fires)
 
 
-def collect_entries_for_push(
+async def collect_entries_for_push(
     last_push_time: Optional[datetime],
     context_days: int = 2,
     min_score: int = 60,
     data_dir: str = "news-data",
     preferences: Optional[Dict] = None,
     max_items: Optional[int] = None,
+    config: Optional[Dict] = None,
 ) -> tuple[List[Dict], List[Dict]]:
     """
     Collect entries for delivery and return (entries_to_push, context_entries).
 
     Logic:
-    1. Load all entries from the last context_days days.
-    2. Filter by min_score.
-    3. Load sent-history.json.
-    4. Filter links that have already been sent.
-    5. Unsent entries from the last 24 hours become delivery candidates.
-    6. Earlier entries become LLM deduplication context.
+    1. Retrieve pre-scored news from server if mode is client or mix.
+    2. Load local custom feeds entries from the last context_days days.
+    3. Merge server and local entries.
+    4. Filter by min_score.
+    5. Load sent-history.json.
+    6. Filter links that have already been sent.
+    7. Unsent entries from the last 24 hours become delivery candidates.
+    8. Earlier entries become LLM deduplication context.
     """
-    tz = get_timezone()
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:
+            config = {}
+
+    tz = get_timezone(config)
     now = datetime.now(tz)
 
-    # Load all entries from the last context_days days.
-    all_entries = []
+    # 1. Retrieve pre-scored news from server
+    server_entries = []
+    mode = config.get("mode_settings", {}).get("mode", "standalone")
+
+    if last_push_time:
+        if last_push_time.tzinfo is None:
+            last_push_time_tz = last_push_time.replace(tzinfo=tz)
+        else:
+            last_push_time_tz = last_push_time.astimezone(tz)
+        # Calculate hours elapsed since the last push
+        hours_since_last_push = int((now - last_push_time_tz).total_seconds() // 3600)
+        lookback_hours = min(24, max(1, hours_since_last_push))
+    else:
+        lookback_hours = min(24, context_days * 24)
+
+    print(f"📋 Last push was at: {last_push_time or 'None'}. Querying server with lookback_hours: {lookback_hours}")
+
+    if mode == "mix":
+        try:
+            from src.server_cache import server_news_cache
+            if not server_news_cache._initialized:
+                server_news_cache.initialize(data_dir, config)
+            server_entries = server_news_cache.get_news(lookback_hours, config)
+            print(f"📋 Retrieved {len(server_entries)} pre-scored entries from in-memory server cache")
+        except Exception as e:
+            print(f"⚠️ Failed to get news from in-memory cache: {e}")
+    elif mode == "client":
+        try:
+            params = {"hours": lookback_hours}
+            res = await query_server_api("/api/server/news", config, params=params)
+            if isinstance(res, list):
+                server_entries = res
+                print(f"📋 Retrieved {len(server_entries)} pre-scored entries from server API")
+            else:
+                print("⚠️ Server API returned non-list or failed, falling back to local files.")
+        except Exception as e:
+            print(f"⚠️ Failed to query server news API: {e}")
+
+    # 2. Load all entries from the last context_days days.
+    local_entries = []
     today = now.date()
     for i in range(context_days):
         d = today - timedelta(days=i)
         fetch_file = get_fetch_file(d, data_dir)
         for entry in read_entries(fetch_file):
-            all_entries.append(entry)
+            local_entries.append(entry)
+
+    # Merge entries based on link
+    merged = {e.get("link"): e for e in (server_entries + local_entries) if e.get("link")}
+    all_entries = list(merged.values())
 
     print(
-        f"📋 Collected entries: {len(all_entries)}, context_days: {context_days}, min_score: {min_score}"
+        f"📋 Collected entries: {len(all_entries)} (server: {len(server_entries)}, local: {len(local_entries)}), context_days: {context_days}, min_score: {min_score}"
     )
 
     # Filter by min_score.
@@ -318,7 +371,7 @@ def collect_entries_for_push(
     print(f"📋 Entries after score filtering: {len(qualified_entries)}")
 
     # Load sent history for deduplication.
-    sent_links = load_sent_links(days=3, data_dir=data_dir)
+    sent_links = load_sent_links(days=30, data_dir=data_dir)
     print(f"📋 Sent history loaded: {len(sent_links)} filtered links")
 
     # Keep unsent candidates eligible for 24 hours. Sent history, rather than the
@@ -345,7 +398,7 @@ def collect_entries_for_push(
             sent_filtered += 1
             continue
 
-        entry_time = parse_time_to_local(entry.get("fetched_at", ""))
+        entry_time = parse_time_to_local(entry.get("fetched_at", ""), config)
         if entry_time and entry_time > push_cutoff:
             to_push.append(entry)
         else:
@@ -443,10 +496,89 @@ def active_delivery_schedule(config: Dict, now: Optional[datetime] = None) -> Di
     return min(candidates, key=lambda item: item[0])[1] if candidates else {}
 
 
+async def query_server_api(path: str, config: Dict, params: Optional[Dict] = None) -> Optional[any]:
+    """Helper to query the server REST API using aiohttp."""
+    import aiohttp
+    settings = config.get("mode_settings", {})
+    server_url = settings.get("server_url", "http://127.0.0.1:12301").rstrip("/")
+    token = settings.get("server_api_token", "") or os.environ.get("NEWS_AGENT_LOCAL_TOKEN", "")
+
+    headers = {}
+    if token:
+        headers["X-News-Agent-Token"] = token
+
+    url = f"{server_url}{path}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params, timeout=30) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    print(f"⚠️ Server returned status {response.status} for {path}")
+    except Exception as e:
+        print(f"⚠️ Failed to connect to server API {url}: {e}")
+    return None
+
+
 async def run_fetch_job(config: Dict):
     print(f"\n{'=' * 50}")
-    print(f"🔄 Fetch Job | {now_local().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔄 Fetch Job | {now_local(config).strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 50}")
+
+    # Check mode settings
+    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    sources = merge_sources(config["sources"])
+
+    if mode == "client":
+        import copy
+        fetch_config = copy.deepcopy(config)
+        print("🔌 Running in Client Mode. Querying server for active sources...")
+        server_sources = await query_server_api("/api/news-sources", config)
+        if server_sources:
+            # 1. Filter RSS sources (only keep custom feeds not on the server)
+            server_rss_urls = {s.get("xmlUrl") for s in server_sources.get("rss", []) if s.get("xmlUrl")}
+            sources = [s for s in sources if s.get("xmlUrl") not in server_rss_urls]
+            print(f"🔌 Filtered RSS sources. Custom local RSS feeds to fetch: {len(sources)}")
+
+            # 2. Filter integrations/sections
+            server_integrations = {i["id"]: i for i in server_sources.get("integrations", []) if "id" in i}
+
+            # GitHub Trending
+            if fetch_config.get("sections", {}).get("github_trending", {}).get("enabled"):
+                s_gh = server_integrations.get("github_trending")
+                if s_gh and s_gh.get("enabled"):
+                    print("🔌 GitHub Trending is enabled on the server. Skipping local fetch.")
+                    fetch_config["sections"]["github_trending"]["enabled"] = False
+
+            # Hacker News
+            if fetch_config.get("sections", {}).get("hackernews", {}).get("enabled"):
+                s_hn = server_integrations.get("hackernews")
+                if s_hn and s_hn.get("enabled"):
+                    print("🔌 Hacker News is enabled on the server. Skipping local fetch.")
+                    fetch_config["sections"]["hackernews"]["enabled"] = False
+
+            # Google News (google-news-...)
+            if fetch_config.get("sections", {}).get("google_news", {}).get("enabled"):
+                any_google_news_server = any(
+                    id_str.startswith("google-news-") and i.get("enabled")
+                    for id_str, i in server_integrations.items()
+                )
+                if any_google_news_server:
+                    print("🔌 Google News is enabled on the server. Skipping local fetch.")
+                    fetch_config["sections"]["google_news"]["enabled"] = False
+
+            # Signals
+            if fetch_config.get("sections", {}).get("signals", {}).get("enabled"):
+                local_signals_sources = fetch_config["sections"]["signals"].setdefault("sources", {})
+                for sig_id in list(local_signals_sources.keys()):
+                    s_sig = server_integrations.get(sig_id)
+                    if s_sig and s_sig.get("enabled"):
+                        local_signals_sources[sig_id] = False
+                print("🔌 Filtered signal sources to avoid server duplicate fetching.")
+
+            config = fetch_config
+        else:
+            print("⚠️ Could not connect to server. Falling back to local standalone fetch.")
 
     interval = config["schedule"]["fetch_interval_minutes"]
     lookback = config["schedule"].get("fetch_lookback_minutes", 1440)
@@ -454,7 +586,8 @@ async def run_fetch_job(config: Dict):
     threshold = lookback + interval
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback)
 
-    sources = merge_sources(config["sources"])
+    if mode != "client":
+        sources = merge_sources(config["sources"])
     print(f"📂 Sources configured: {len(sources)}")
 
     if not sources:
@@ -577,8 +710,18 @@ async def run_fetch_job(config: Dict):
 
     print(f"💾 Saved to {fetch_file}")
 
+    # Update in-memory cache if we are in server (mix/standalone) mode
+    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    if mode in ("standalone", "mix"):
+        try:
+            from src.server_cache import server_news_cache
+            server_news_cache.update(scored, config)
+            print(f"💾 Updated in-memory cache with {len(scored)} entries")
+        except Exception as e:
+            print(f"⚠️ Failed to update in-memory cache: {e}")
+
     immediate_config = config.get("delivery", {}).get("immediate", {})
-    immediate_enabled = immediate_config.get("enabled", True)
+    immediate_enabled = immediate_config.get("enabled", False)
     hot_threshold = int(immediate_config.get("threshold", config["filter"]["hot_threshold"]))
     no_content_marker = config["filter"].get("no_content_marker", "[NO_NEW_CONTENT]")
     hot_entries = [e for e in scored if (e.get("score") or 0) >= hot_threshold] if immediate_enabled else []
@@ -596,8 +739,12 @@ async def run_fetch_job(config: Dict):
 
         # Load recent sent content for LLM deduplication and style diversity.
         context_days = config["filter"]["context_days"]
-        recent_notify = load_recent_notify_content(context_days, data_dir=data_dir)
-        recent_push = load_recent_push_content(context_days, data_dir=data_dir)
+        recent_notify = format_recent_push_summary_context(
+            load_recent_notify_content(context_days, data_dir=data_dir)
+        )
+        recent_push = format_recent_push_summary_context(
+            load_recent_push_content(context_days, data_dir=data_dir)
+        )
         recent_context = (
             f"=== Recent immediate deliveries ===\n{recent_notify}\n\n"
             f"=== Recent digest deliveries ===\n{recent_push}"
@@ -656,8 +803,34 @@ async def run_fetch_job(config: Dict):
 
 async def run_push_job(config: Dict):
     print(f"\n{'=' * 50}")
-    print(f"📤 Push Job | {now_local().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📤 Push Job | {now_local(config).strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 50}")
+
+    # If in client mode and no local LLM is configured, pull pre-compiled digest directly from server
+    mode = config.get("mode_settings", {}).get("mode", "standalone")
+    has_local_llm = False
+    llm_cfg = config.get("llm", {})
+    api_key_name = llm_cfg.get("apiKeyName")
+    if api_key_name and os.environ.get(api_key_name):
+        has_local_llm = True
+
+    if mode == "client" and not has_local_llm:
+        print("🔌 Client has no LLM configured. Fetching pre-compiled digest from server...")
+        digest_data = await query_server_api("/api/server/latest-digest", config)
+        if digest_data and digest_data.get("found"):
+            content = digest_data.get("content", "")
+            title = digest_data.get("title", "")
+            metadata = digest_data.get("metadata", {})
+            if content:
+                print(f"🔌 Retrieved pre-compiled digest from server: '{title}'")
+                await send_to_platforms(content, config["push"], title=title, metadata=metadata)
+                print("✅ Pre-compiled digest successfully delivered")
+                return
+            else:
+                print("⚠️ Pre-compiled digest content is empty")
+        else:
+            print("⚠️ Failed to retrieve pre-compiled digest from server")
+        return
 
     policy = active_delivery_schedule(config, now_local(config))
     use_extended_sections = bool(policy.get("sections")) and any(
@@ -731,13 +904,14 @@ async def _run_default_push(config: Dict):
         min_score = config["filter"]["min_score"]
         context_days = config["filter"]["context_days"]
         data_dir = config.get("storage", {}).get("data_dir", "news-data")
-        to_push, _ = collect_entries_for_push(
+        to_push, _ = await collect_entries_for_push(
             last_push_time=last_push_time,
             context_days=context_days,
             min_score=min_score,
             data_dir=data_dir,
             preferences=config.get("preferences"),
             max_items=None,
+            config=config,
         )
         sent_links = links_present_in_content(to_push, delivery_md)
         mark_links_as_sent(sent_links, data_dir=data_dir)
@@ -847,13 +1021,14 @@ async def _run_morning_push(config: Dict):
         min_score = config["filter"]["min_score"]
         context_days = config["filter"]["context_days"]
         data_dir = config.get("storage", {}).get("data_dir", "news-data")
-        to_push, _ = collect_entries_for_push(
+        to_push, _ = await collect_entries_for_push(
             last_push_time=last_push_time,
             context_days=context_days,
             min_score=min_score,
             data_dir=data_dir,
             preferences=config.get("preferences"),
             max_items=None,
+            config=config,
         )
         sent_links = links_present_in_content(to_push, final)
         mark_links_as_sent(sent_links, data_dir=data_dir)

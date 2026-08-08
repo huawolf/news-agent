@@ -65,6 +65,16 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 - **Logging & Audit Service:** Manages rolling log files and audits configuration modifications made by users or agents.
 - **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger Feishu error alerts.
 
+### 2.1 Server-Client & Mix Mode Architecture
+
+To optimize LLM token usage and reduce cost across multiple deployments, the system supports a distributed Server-Client architecture configured via `mode_settings`:
+
+- **Standalone Mode (Default):** The daemon runs independently. Fetching, scoring, and push loops are executed locally in a self-contained process.
+- **Mix Mode:** Acts as both a Server and a Client:
+  - **Server Responsibilities:** Periodically fetches and scores configured RSS and signal sources, maintains a rolling 24-hour in-memory cache of scored entries, and exposes the `GET /api/server/news` REST API endpoint.
+  - **Client Responsibilities:** Runs push schedules locally, merging cache data with client-side custom feeds before sending.
+- **Client Mode:** Client-only mode. It disables server-side scheduling. When a scheduled push is triggered, the client queries the server's API to retrieve pre-scored news from the last 24 hours. If any custom feeds are configured on the client that do not exist on the server, the client fetches and scores them locally, merges both datasets, and formats/delivers the digest.
+
 ---
 
 ## 3. Configuration & Data Directory Layout
@@ -88,7 +98,7 @@ news-agent/
   runs/
 ```
 
-- `news-data/`: Retains existing raw payload formats (`fetch-*.json`, `push-*.md`, `notify-*.md`).
+- `news-data/`: Retains data files (`fetch-*.json`, `push-*.md`, `notify-*.md`, and `sent-history.json`), automatically cleaned up after 30 days (`keep_days: 30`).
 - `runs/`: Stores structured JSON job execution summaries and statuses.
 
 ### 3.2 Configuration Schema Evolution
@@ -120,7 +130,7 @@ Top-level configuration schema with backward compatibility:
         "sections": ["rss"]
       }
     ],
-    "immediate": {"enabled": true, "threshold": 92, "daily_limit": 3}
+    "immediate": {"enabled": false, "threshold": 92, "daily_limit": 3}
   }
 }
 ```
@@ -251,6 +261,11 @@ evidence-backed startup opportunities, and major AI/technology advances. When th
 model returns fewer items than requested despite enough complete scored candidates,
 the system fills the remaining slots deterministically from that ranked pool.
 
+To optimize LLM token usage and reduce API cost without compromising digest quality, the system employs a two-stage scoring and lazy summarization pipeline:
+1. **First Stage (Batch Scoring & Rating):** Entry content snippets are truncated to 1,000 characters (down from 2,000). The LLM evaluates `quality_score`, `interest_score`, `score`, `tags`, and `keywords` without generating full summaries during scoring.
+2. **Second Stage (Digest Synthesis & Lazy Summarization):** High-quality candidates passing the score threshold enter digest synthesis (`compose_digest` / `generate_immediate_push`), where the model generates Markdown headlines and summaries directly for selected items.
+3. **Slimmed Deduplication Context:** Recent push history provided for LLM deduplication is formatted as a compact `[Title | Link | Summary]` list rather than raw multi-paragraph Markdown.
+
 Sent history records only candidate URLs that occur in the final delivered Markdown.
 Model inputs omitted from immediate or scheduled output remain eligible for a later
 delivery for up to 24 hours; the previous push timestamp does not discard an unsent
@@ -333,6 +348,8 @@ Scheduler / Web / Local API / MCP
 | `POST` | `/api/jobs/run?confirm=true` | Trigger immediate pipeline run |
 | `GET` | `/api/jobs/{id}` | Query job status and record |
 | `GET` | `/api/logs` | Fetch system logs |
+| `GET` | `/api/server/news` | Pull pre-scored news within a specified time window (up to 24h) |
+| `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
 
 Local security: API binds to `127.0.0.1:12301` and supports optional token verification (`X-News-Agent-Token`).
 

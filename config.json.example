@@ -4,7 +4,7 @@
         "min_score": 60,
         "hot_threshold": 90,
         "context_days": 2,
-        "keep_days": 7,
+        "keep_days": 30,
         "push_context_days": 5,
         "no_content_marker": "[NO_NEW_CONTENT]"
     },
@@ -35,7 +35,7 @@
             }
         ],
         "immediate": {
-            "enabled": true,
+            "enabled": false,
             "threshold": 90,
             "daily_limit": 3
         }
@@ -142,6 +142,11 @@
             "apiKeyName": "CUSTOM_PUSH_URL",
             "tokenKeyName": "CUSTOM_PUSH_TOKEN"
         }
+    },
+    "mode_settings": {
+        "mode": "standalone",
+        "server_url": "http://127.0.0.1:12301",
+        "server_api_token": "processednews"
     },
     "sources": {
         "base_opml": "resources/rss.opml",

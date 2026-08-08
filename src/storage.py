@@ -184,6 +184,47 @@ def load_recent_push_content(
     return "\n\n------\n\n".join(bodies)
 
 
+def format_recent_push_summary_context(raw_text: str) -> str:
+    """将历史推送的原始 Markdown 提取并转换为简略列表格式 [Title | Link | Summary]，减少 LLM 查重 Token 占用。"""
+    if not raw_text or not raw_text.strip():
+        return ""
+
+    items = []
+    blocks = re.split(r"(?m)^###\s+", raw_text)
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.split("\n")
+        heading_line = lines[0].strip()
+        title = re.sub(r"^\d+\.\s*", "", heading_line).strip()
+
+        body_text = "\n".join(lines[1:]).strip()
+        link_match = re.search(
+            r"\[(?:查看原文|Read original|原文链接)\]\((https?://[^\s\)]+)\)", body_text
+        )
+        link = link_match.group(1) if link_match else ""
+
+        clean_summary = re.sub(
+            r"\[(?:查看原文|Read original|原文链接)\]\([^\s\)]+\)", "", body_text
+        ).strip()
+        clean_summary = " ".join(clean_summary.split())
+
+        if title:
+            item_str = f"- Title: {title}"
+            if link:
+                item_str += f" | Link: {link}"
+            if clean_summary:
+                item_str += f" | Summary: {clean_summary}"
+            items.append(item_str)
+
+    if not items:
+        return raw_text.strip()
+
+    return "\n".join(items)
+
+
+
 def get_last_push_file(data_dir: str = "news-data") -> Optional[str]:
     """从news-data目录找到最新的有效push文件。
 
@@ -439,8 +480,8 @@ def load_existing_links(filepath: str, threshold: int = 150, data_dir: str = "ne
     return all_links
 
 
-def cleanup_old_files(days: int = 7, data_dir: str = "news-data"):
-    """清理超过days天的旧文件"""
+def cleanup_old_files(days: int = 30, data_dir: str = "news-data"):
+    """清理超过days天的旧文件及已发送历史记录"""
     data_path = Path(data_dir)
     if not data_path.exists():
         return
@@ -470,7 +511,8 @@ def cleanup_old_files(days: int = 7, data_dir: str = "news-data"):
             except (ValueError, OSError):
                 continue
 
-    # trending-history.json: 保持永久历史记录,不再剪枝过期条目
+    # 自动清理 sent-history.json 中超过 days 天的已发送记录
+    load_sent_links(days=days, data_dir=data_dir)
 
     if deleted_count > 0:
         print(f"   ✅ 清理完成: 删除了 {deleted_count} 个旧文件")
@@ -609,8 +651,8 @@ def assemble_with_sentinels(sections: Dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
-def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
-    """加载 sent-history.json 中 3 天内已发送的链接，并自动清理过期条目"""
+def load_sent_links(days: int = 30, data_dir: str = "news-data") -> set:
+    """加载 sent-history.json 中 30 天内已发送的链接，并自动清理过期条目"""
     path = Path(data_dir) / "sent-history.json"
     if not path.exists() or path.stat().st_size == 0:
         return set()

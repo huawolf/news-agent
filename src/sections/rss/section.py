@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple
 from src.llm import _llm_error_message, compose_digest, parse_digest_with_metadata
 from src.storage import (
     extract_push_time,
+    format_recent_push_summary_context,
     get_last_push_file,
     load_recent_push_content,
 )
@@ -78,13 +79,14 @@ async def run_rss_section(
 
     target_items = max(1, int(max_items or 10))
 
-    to_push, context = collect_entries_for_push(
+    to_push, context = await collect_entries_for_push(
         last_push_time=last_push_time,
         context_days=context_days,
         min_score=min_score,
         data_dir=data_dir,
         preferences=config.get("preferences"),
         max_items=None,
+        config=config,
     )
 
     if not to_push:
@@ -100,6 +102,7 @@ async def run_rss_section(
 
     push_context_days = config["filter"].get("push_context_days", 5)
     recent = load_recent_push_content(push_context_days, data_dir=data_dir)
+    recent = format_recent_push_summary_context(recent)
 
     try:
         raw = await compose_digest(

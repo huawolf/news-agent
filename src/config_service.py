@@ -104,7 +104,7 @@ class ConfigService:
                 "diversity": {"max_per_source": 2, "max_per_topic": 3},
             },
             "delivery": {"timezone": "Asia/Shanghai", "schedules": [],
-                         "immediate": {"enabled": True, "threshold": 90, "daily_limit": 3}},
+                         "immediate": {"enabled": False, "threshold": 90, "daily_limit": 3}},
             "storage": {"data_dir": str(self.paths["news_data"])},
             "log": {"retention_days": 30},
         }
