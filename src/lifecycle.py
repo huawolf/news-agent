@@ -25,7 +25,7 @@ def install() -> str:
         target.write_text(f"""<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\"><dict><key>Label</key><string>com.news-agent.local</string>
-<key>ProgramArguments</key><array><string>{executable}</string><string>-m</string><string>src.main</string><string>serve</string></array>
+<key>ProgramArguments</key><array><string>{executable}</string><string>-m</string><string>src.main</string><string>serve</string><string>--host</string><string>0.0.0.0</string></array>
 <key>WorkingDirectory</key><string>{PROJECT_ROOT}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 </dict></plist>""", encoding="utf-8")
         subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], check=False, capture_output=True)
@@ -33,7 +33,7 @@ def install() -> str:
     if os.name == "nt":
         # Task Scheduler does not support a WorkingDirectory field. Run through
         # cmd so Python can import the project package and load the local .env.
-        command = f'cmd /d /c "cd /d \"{PROJECT_ROOT}\" && \"{executable}\" -m src.main serve"'
+        command = f'cmd /d /c "cd /d \"{PROJECT_ROOT}\" && \"{executable}\" -m src.main serve --host 0.0.0.0"'
         subprocess.run(["schtasks", "/Create", "/F", "/SC", "ONLOGON", "/TN", "News Agent", "/TR", command], check=True)
         return "installed Windows Task Scheduler task: News Agent"
     directory = Path.home() / ".config" / "systemd" / "user"
@@ -46,7 +46,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={PROJECT_ROOT}
-ExecStart={executable} -m src.main serve
+ExecStart={executable} -m src.main serve --host 0.0.0.0
 Restart=on-failure
 RestartSec=5
 
