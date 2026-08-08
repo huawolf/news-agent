@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Dict, List, Optional
 from pathlib import Path
 from src.storage import get_fetch_file, read_entries
@@ -77,8 +78,13 @@ class InMemoryNewsCache:
         # Sort by fetched_at descending
         self._entries = sorted(valid_entries, key=lambda x: x.get("fetched_at", ""), reverse=True)
 
-    def get_news(self, hours: int, config: Dict) -> List[Dict]:
-        """Retrieve news within the past N hours (max 24)."""
+    def get_news(
+        self,
+        hours: int,
+        config: Dict,
+        min_score: Optional[float] = None,
+    ) -> List[Dict]:
+        """Retrieve news within the past N hours, optionally filtering by score."""
         tz = get_timezone(config)
         now = datetime.now(tz)
 
@@ -88,6 +94,14 @@ class InMemoryNewsCache:
 
         results = []
         for entry in self._entries:
+            if min_score is not None:
+                try:
+                    score = float(entry["score"])
+                    if not isfinite(score) or score < min_score:
+                        continue
+                except (KeyError, TypeError, ValueError):
+                    continue
+
             fetched_at_str = entry.get("fetched_at")
             if not fetched_at_str:
                 continue

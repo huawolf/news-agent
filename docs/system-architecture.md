@@ -75,7 +75,7 @@ To optimize LLM token usage and reduce cost across multiple deployments, the sys
 - **Mix Mode:** Acts as both a Server and a Client:
   - **Server Responsibilities:** On every full run, fetches and scores every enabled news source, refreshes GitHub Trending, maintains a rolling 24-hour in-memory news cache plus the latest successful GitHub cache, and exposes the shared REST endpoints.
   - **Delivery Responsibilities:** Uses the same unified news and GitHub pipeline for its own manual and scheduled deliveries; schedules select only time and final news count.
-- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours and the pre-compiled GitHub section. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
+- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours, limited by the shared API to entries with `score >= 60`, and the pre-compiled GitHub section. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
   Every delivery query requests the complete rolling 24-hour eligibility window;
   local sent history removes delivered URLs. If the server is unavailable, the
   client may continue fetching user-added RSS feeds but must not fall back to
@@ -405,7 +405,7 @@ complete `run` cycle.
 | `POST` | `/api/jobs/run?confirm=true` | Trigger immediate pipeline run |
 | `GET` | `/api/jobs/{id}` | Query job status and record |
 | `GET` | `/api/logs` | Fetch system logs |
-| `GET` | `/api/server/news` | Pull pre-scored news within a specified time window (up to 24h) |
+| `GET` | `/api/server/news` | Pull pre-scored news with `score >= 60` within a specified time window (up to 24h) |
 | `GET` | `/api/server/sources` | Pull the shared server source catalog used for client-side filtering |
 | `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
 | `GET` | `/api/server/github-trending` | Pull the latest successful cached GitHub Trending section Markdown |

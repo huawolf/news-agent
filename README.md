@@ -49,7 +49,7 @@ The installer creates `.env` from `.env.example`, installs the locked runtime de
 
 Regular users run in `client` mode by default. The shared server fetches and
 scores the common source catalog once; each client pulls the last 24 hours of
-processed entries plus the latest successful GitHub digest, adds and scores only
+processed entries scoring at least 60 plus the latest successful GitHub digest, adds and scores only
 its private custom RSS feeds, then uses its own preferences, schedule, language,
 item limit, LLM, and delivery channel to select, summarize, and send the digest.
 
@@ -129,7 +129,7 @@ Important settings:
   with at most 10 news items each time.
 - `delivery.immediate`: high-score alert threshold and daily limit.
 - `mode_settings`: selects `standalone`, `mix`, or `client`. Client deployments
-  read pre-scored entries from `server_url`; mix deployments also expose the
+  read pre-scored entries with `score >= 60` from `server_url`; mix deployments also expose the
   rolling shared-news API. `server_api_token_name` carries the shared API value
   `processednews`; it is unrelated to `NEWS_AGENT_LOCAL_TOKEN`.
 - `push`: enable Feishu, Discord, or a custom endpoint.

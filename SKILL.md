@@ -83,7 +83,7 @@ is explicitly operating the shared server:
 
 Use `mix` only for the shared server operator. Use `standalone` only for an
 explicit self-contained deployment.
-Client mode retrieves the shared scored pool and locally fetches/scores only
+Client mode retrieves shared entries with `score >= 60` and locally fetches/scores only
 custom RSS feeds absent from the server catalog. Manual and scheduled runs use
 the same pipeline: one unified news pool plus the server-provided GitHub digest.
 

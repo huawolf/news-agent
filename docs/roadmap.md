@@ -110,6 +110,7 @@
 - **Completed:** Manual and scheduled deliveries now share one full news and GitHub pipeline; per-schedule RSS/Hacker News/insights section selection has been removed.
 - **Completed:** Mix and standalone servers retain the latest successful GitHub section independently of push files for shared clients.
 - **Completed:** Web-triggered job output is line-buffered so active fetch and push progress is visible before job completion.
+- **Completed:** The shared news API filters out entries below score 60, including entries with missing or invalid scores, before sending data to clients.
 
 - [x] Add `mix` mode with a rolling 24-hour in-memory scored-news cache.
 - [x] Expose shared news, source catalog, latest digest, and GitHub endpoints.

@@ -28,6 +28,8 @@ from src.sections.signals.collector import signal_source_catalog
 from src.source_categories import normalize_source_category
 from src.storage import extract_section, get_last_push_file, limit_delivery_items
 
+SHARED_NEWS_MIN_SCORE = 60
+
 
 class SourceInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
@@ -243,7 +245,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Server news API is only available on standalone or mix mode servers")
 
         from src.server_cache import server_news_cache
-        return server_news_cache.get_news(hours, config)
+        return server_news_cache.get_news(
+            hours,
+            config,
+            min_score=SHARED_NEWS_MIN_SCORE,
+        )
 
     @app.get("/api/server/latest-digest", dependencies=[Depends(require_server_api_token)])
     async def get_server_latest_digest() -> dict:
