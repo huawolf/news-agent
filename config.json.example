@@ -144,8 +144,8 @@
         }
     },
     "mode_settings": {
-        "mode": "standalone",
-        "server_url": "http://127.0.0.1:12301",
+        "mode": "client",
+        "server_url": "http://13.158.182.33:12301",
         "server_api_token": "processednews"
     },
     "sources": {

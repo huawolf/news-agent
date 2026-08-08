@@ -196,6 +196,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if expected_token and x_news_agent_token != expected_token:
             raise HTTPException(status_code=401, detail="invalid local token")
 
+    async def require_server_api_token(x_news_agent_token: str | None = Header(default=None)) -> None:
+        config = service.load()
+        expected_api = config.get("mode_settings", {}).get("server_api_token", "processednews")
+        expected_admin = os.environ.get("NEWS_AGENT_LOCAL_TOKEN")
+
+        if expected_api and x_news_agent_token == expected_api:
+            return
+        if expected_admin and x_news_agent_token == expected_admin:
+            return
+        if not expected_api and not expected_admin:
+            return
+        raise HTTPException(status_code=401, detail="invalid token")
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         config = service.load()
@@ -226,7 +239,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def status() -> dict:
         return {"status": "running", "config_path": str(service.config_path), "jobs": jobs.status(), "schedules": scheduler.state()}
 
-    @app.get("/api/server/news", dependencies=[Depends(require_token)])
+    @app.get("/api/server/news", dependencies=[Depends(require_server_api_token)])
     async def get_server_news(hours: int = 24) -> list[dict]:
         config = service.load()
         mode = config.get("mode_settings", {}).get("mode", "standalone")
@@ -236,7 +249,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from src.server_cache import server_news_cache
         return server_news_cache.get_news(hours, config)
 
-    @app.get("/api/server/latest-digest", dependencies=[Depends(require_token)])
+    @app.get("/api/server/latest-digest", dependencies=[Depends(require_server_api_token)])
     async def get_server_latest_digest() -> dict:
         config = service.load()
         mode = config.get("mode_settings", {}).get("mode", "standalone")
@@ -262,7 +275,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to read latest push file: {exc}") from exc
 
-    @app.get("/api/server/github-trending", dependencies=[Depends(require_token)])
+    @app.get("/api/server/github-trending", dependencies=[Depends(require_server_api_token)])
     async def get_server_github_trending() -> dict:
         config = service.load()
         mode = config.get("mode_settings", {}).get("mode", "standalone")
@@ -421,7 +434,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 results.append({"url": url, "status": "rejected", "reason": str(exc)})
         return {"results": results}
 
-    @app.get("/api/news-sources", dependencies=[Depends(require_token)])
+    @app.get("/api/news-sources", dependencies=[Depends(require_server_api_token)])
     async def news_sources() -> dict:
         config = service.load()
         return {
