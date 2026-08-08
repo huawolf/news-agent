@@ -45,16 +45,38 @@ The installer creates `.env` from `.env.example`, installs the locked runtime de
 
 ## Configure
 
-Add your credentials to `.env`, or edit them in the **Secrets and connection settings** section of the local web console. The console displays local `.env` values, so keep the browser session private. The names must match the `apiKeyName` fields in your configuration.
+Configure the model, endpoint, protocol, API key, and delivery webhooks in the
+**Model and delivery settings** section of the local web console. The fields
+save automatically and the model connection can be tested in place. Keep the
+console private because it displays configured secret values.
+
+Secrets are stored in `.env`. Model settings, preferences, and delivery
+schedules are stored in `config.json` through the validated local API. The LLM
+key variable in `.env` must match `llm.apiKeyName`; the default configuration
+uses `DEEPSEEK_API_KEY`.
 
 ```dotenv
 DEEPSEEK_API_KEY=your_llm_api_key
 FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...
 # DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-# PH_TOKEN=optional_product_hunt_developer_token
 ```
 
-The first run creates the local configuration from [config.json.example](config.json.example). Use the web console to manage feeds, preferences, and schedules. For file-based configuration, copy the example and edit only the settings you need.
+When using another key variable, such as `OPENAI_API_KEY` or
+`ANTHROPIC_API_KEY`, set `llm.apiKeyName` to the same name through the local API.
+After editing `.env` directly, restart the service from the project directory:
+
+```bash
+uv run news-agent service restart
+```
+
+The first service start creates `config.json` from
+[config.json.example](config.json.example). Use the web console or local API to
+manage model settings, feeds, preferences, and schedules instead of replacing
+the active configuration file.
+
+Optional source integrations can also use `.env` credentials. Product Hunt,
+for example, uses `PH_TOKEN` when configured and falls back to its public feed
+when the token is absent.
 
 Important settings:
 
