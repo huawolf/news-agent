@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import os
+
+logger = logging.getLogger("news_agent.server")
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +23,7 @@ from src.config import get_server_api_token
 from src.config_service import ConfigError, ConfigService
 from src.environment_service import EnvironmentError, EnvironmentService
 from src.jobs import JobExecutor
-from src.llm import check_llm_available
+from src.llm import check_llm_available, call_llm
 from src.llm_protocol import LLM_PROTOCOLS, infer_llm_protocol, resolve_llm_endpoint
 from src.markdown_utils import parse_frontmatter
 from src.sections.signals.collector import signal_source_catalog
@@ -175,7 +177,7 @@ async function savePersonalPreferences(){await api('/api/personal-preferences',{
 function scheduleConnectionAutoSave(){clearTimeout(connectionSaveTimer);$('connectionSaveStatus').className='run-state';$('connectionSaveStatus').textContent=t('savingSettings');connectionSaveTimer=setTimeout(()=>{connectionSaveTimer=null;saveConnectionSettings(false)},800)}
 async function saveConnectionSettings(manual=true){if(connectionSaveRunning){connectionSaveQueued=true;return false}let model=$('llmModel').value,baseUrl=$('llmBaseUrl').value,protocol=$('llmProtocol').value,values={};document.querySelectorAll('[data-env]').forEach(x=>values[x.dataset.env]=x.value);let invalid=!model.trim()||!baseUrl.trim()||[...document.querySelectorAll('[data-env][required]')].some(x=>!x.value.trim());if(invalid){$('connectionSaveStatus').textContent='';if(manual)alert(t('required'));return false}connectionSaveRunning=true;$('connectionSaveStatus').className='run-state';$('connectionSaveStatus').textContent=t('savingSettings');try{await Promise.all([api('/api/llm-settings',{method:'PUT',body:JSON.stringify({model,base_url:baseUrl,protocol})}),api('/api/environment',{method:'PUT',body:JSON.stringify({values})})]);document.querySelectorAll('[data-env]').forEach(input=>{let state=input.closest('label').querySelector('[data-env-state]'),configured=!!input.value.trim();if(state){state.className=configured?'configured':'missing';state.textContent=configured?t('configured'):t('missing')}});$('connectionSaveStatus').className='run-state result-ok';$('connectionSaveStatus').textContent=t('autoSaved');if(manual)alert(t('saved'));return true}catch(e){$('connectionSaveStatus').className='run-state result-error';$('connectionSaveStatus').textContent=e.message;if(manual)alert(e.message);return false}finally{connectionSaveRunning=false;if(connectionSaveQueued){connectionSaveQueued=false;scheduleConnectionAutoSave()}}}
 async function flushConnectionAutoSave(){clearTimeout(connectionSaveTimer);connectionSaveTimer=null;while(connectionSaveRunning)await new Promise(resolve=>setTimeout(resolve,50));return saveConnectionSettings(false)}
-async function testConnectionSettings(){if(!$('llmModel').value.trim()||!$('llmBaseUrl').value.trim()){alert(t('required'));return}let button=$('testModelButton'),status=$('modelTestStatus'),keyInput=document.querySelector(`[data-env="${llmApiKeyName}"]`);if(keyInput&&!keyInput.value.trim()){alert(t('required'));return}button.disabled=true;connectionTestRunning=true;status.className='run-state';status.textContent=t('testingModel');try{if(!await flushConnectionAutoSave())throw new Error(t('required'));let model=$('llmModel').value,baseUrl=$('llmBaseUrl').value,protocol=$('llmProtocol').value,result=await api('/api/llm/test',{method:'POST',body:JSON.stringify({model,base_url:baseUrl,protocol,api_key_name:llmApiKeyName,api_key:keyInput?keyInput.value:null})});status.className='run-state result-ok';status.textContent=`${t('modelTestOk')} · ${result.protocol} · ${result.endpoint}`}catch(e){status.className='run-state result-error';status.textContent=e.message}finally{connectionTestRunning=false;button.disabled=false}}
+async function testConnectionSettings(){if(!$('llmModel').value.trim()||!$('llmBaseUrl').value.trim()){alert(t('required'));return}let button=$('testModelButton'),status=$('modelTestStatus'),keyInput=document.querySelector(`[data-env="${llmApiKeyName}"]`);if(keyInput&&!keyInput.value.trim()){alert(t('required'));return}button.disabled=true;connectionTestRunning=true;status.className='run-state';status.textContent=t('testingModel');try{if(!await flushConnectionAutoSave())throw new Error(t('required'));let model=$('llmModel').value,baseUrl=$('llmBaseUrl').value,protocol=$('llmProtocol').value,result=await api('/api/llm/test',{method:'POST',body:JSON.stringify({model,base_url:baseUrl,protocol,api_key_name:llmApiKeyName,api_key:keyInput?keyInput.value:null})});$('llmBaseUrl').value=result.endpoint;$('llmProtocol').value=result.protocol;status.className='run-state result-ok';status.textContent=`${t('modelTestOk')} · ${result.protocol} · ${result.endpoint}`}catch(e){status.className='run-state result-error';status.textContent=e.message}finally{connectionTestRunning=false;button.disabled=false}}
 async function saveEnvironment(){let values={};document.querySelectorAll('[data-env]').forEach(x=>{if(x.value)values[x.dataset.env]=x.value});if(!Object.keys(values).length)return;try{await api('/api/environment',{method:'PUT',body:JSON.stringify({values})});if(values.NEWS_AGENT_LOCAL_TOKEN)sessionStorage.setItem('news-agent-token',values.NEWS_AGENT_LOCAL_TOKEN);alert(t('saved'));load()}catch(e){alert(e.message)}}
 async function addBulkSources(){let urls=$('sourceUrls').value.split(/\\n+/).map(x=>x.trim()).filter(Boolean);if(!urls.length)return;let r=await api('/api/sources/bulk',{method:'POST',body:JSON.stringify({urls})});$('sourceResults').innerHTML=r.results.map(x=>`<div class="source-item ${x.status==='added'?'result-ok':'result-error'}"><strong>${x.status==='added'?t('sourceAdded'):t('sourceRejected')}</strong><small>${escapeHtml(x.url)}</small><span>${escapeHtml(x.title||x.reason||'')}</span></div>`).join('');$('sourceUrls').value='';load()}
 function renderSources(){let category=$('sourceCategory').value||'',q=($('sourceSearch').value||'').toLowerCase(),items=[...sourceData.integrations,...sourceData.rss].filter(x=>x.enabled!==false).filter(x=>!category||x.category===category).filter(x=>`${x.name||x.title} ${x.xmlUrl||''} ${categoryLabel(x.category)}`.toLowerCase().includes(q));$('sourceCategory').innerHTML=`<option value="">${t('allCategories')}</option>`+sourceCategories.map(id=>`<option value="${id}" ${id===category?'selected':''}>${categoryLabel(id)}</option>`).join('');$('sourceList').innerHTML=items.map(x=>`<div class="source-item"><strong>${escapeHtml(x.name||x.title)}</strong><small>${escapeHtml(x.xmlUrl||'')}</small><span class="badge">${escapeHtml(categoryLabel(x.category))}</span><button class="secondary danger source-remove" onclick="removeSource('${encodeURIComponent(x.id)}')">${t('removeSource')}</button></div>`).join('')||`<p class="hint">${t('noSources')}</p>`}
@@ -364,6 +366,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.post("/api/llm/test", dependencies=[Depends(require_token)])
     async def test_llm_settings(payload: LlmTestPayload) -> dict:
+        import re
         parsed = urlparse(payload.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise HTTPException(status_code=400, detail="API URL must be an http or https URL")
@@ -372,26 +375,88 @@ def create_app(config_path: str | None = None) -> FastAPI:
         )
         if protocol not in LLM_PROTOCOLS:
             raise HTTPException(status_code=400, detail="Unsupported LLM protocol")
+
+        base_url = payload.base_url.strip().rstrip("/")
+        candidates = [base_url]
+
+        from src.llm_protocol import _CANONICAL_SUFFIX, _PROTOCOL_SUFFIXES
+        canonical_suffix = _CANONICAL_SUFFIX.get(protocol, "/chat/completions")
+
+        has_suffix = False
+        for suffix in _PROTOCOL_SUFFIXES.get(protocol, []):
+            if base_url.lower().endswith(suffix.lower()):
+                has_suffix = True
+                break
+
+        if not has_suffix:
+            path = parsed.path.lower()
+            has_version = bool(re.search(r'/v\d+(?:[a-zA-Z0-9_-]*)?(?:/|$)', path))
+            if has_version:
+                candidates.append(f"{base_url}{canonical_suffix}")
+            else:
+                candidates.append(f"{base_url}/v1{canonical_suffix}")
+                candidates.append(f"{base_url}{canonical_suffix}")
+
+        unique_candidates = []
+        seen_candidates = set()
+        for c in candidates:
+            if c not in seen_candidates:
+                seen_candidates.add(c)
+                unique_candidates.append(c)
+
         current = service.load().get("llm", {})
         test_config = {
             **current,
             "model": payload.model.strip(),
-            "baseUrl": payload.base_url.strip().rstrip("/"),
             "protocol": protocol,
             "apiKeyName": payload.api_key_name or current.get("apiKeyName", "OPENAI_API_KEY"),
         }
-        try:
-            response = await check_llm_available(
-                test_config, api_key=payload.api_key
+
+        errors = []
+        working_url = None
+        response_text = None
+
+        for candidate in unique_candidates:
+            config_to_test = {**test_config, "baseUrl": candidate}
+            try:
+                response = await asyncio.wait_for(
+                    call_llm("Reply with OK only.", config_to_test, api_key=payload.api_key, direct_url=candidate),
+                    timeout=15
+                )
+                response_text = response.strip()
+                if response_text:
+                    working_url = candidate
+                    break
+            except Exception as exc:
+                errors.append(f"{candidate}: {exc}")
+
+        if not working_url:
+            raise HTTPException(
+                status_code=400,
+                detail="LLM可用性检查失败:\n" + "\n".join(errors)
             )
-            return {
-                "ok": True,
+
+        try:
+            llm_patch = {
+                "model": payload.model.strip(),
+                "baseUrl": working_url,
                 "protocol": protocol,
-                "endpoint": resolve_llm_endpoint(test_config["baseUrl"], protocol),
-                "response": response[:200],
             }
+            if payload.api_key_name:
+                llm_patch["apiKeyName"] = payload.api_key_name.strip()
+            await service.update(
+                {"llm": llm_patch},
+                "web_api",
+            )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            logger.exception("Failed to auto-save working LLM settings")
+
+        return {
+            "ok": True,
+            "protocol": protocol,
+            "endpoint": working_url,
+            "response": response_text[:200],
+        }
 
     @app.put("/api/language", dependencies=[Depends(require_token)])
     async def set_language(payload: LanguagePayload) -> dict:

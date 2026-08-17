@@ -158,8 +158,13 @@ def _llm_request(
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
         }
+        is_reasoning_model = bool(re.search(r"^o[1-9]", model.lower()))
+        if is_reasoning_model:
+            payload["reasoning_effort"] = "low"
+        else:
+            payload["temperature"] = 0.3
+
         if response_format is not None:
             payload["response_format"] = response_format
     return protocol, url, headers, payload
@@ -199,6 +204,7 @@ async def call_llm(
     response_format: Optional[Dict] = None,
     *,
     api_key: Optional[str] = None,
+    direct_url: Optional[str] = None,
 ) -> str:
     """Call an OpenAI Chat, OpenAI Responses, or Anthropic Messages API."""
     api_key_name = config.get("apiKeyName", "OPENAI_API_KEY")
@@ -211,6 +217,8 @@ async def call_llm(
     protocol, url, headers, payload = _llm_request(
         prompt, config, resolved_api_key, response_format
     )
+    if direct_url:
+        url = direct_url
 
     timeout = aiohttp.ClientTimeout(total=int(config.get("request_timeout", 120)))
     async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
