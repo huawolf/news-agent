@@ -147,7 +147,7 @@ def _llm_request(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        payload = {"model": model, "input": prompt}
+        payload = {"model": model, "input": prompt, "stream": False}
         if response_format is not None:
             payload["text"] = {"format": response_format}
     else:
