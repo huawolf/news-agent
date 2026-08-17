@@ -34,6 +34,16 @@ def get_timezone(config: Dict = None) -> timezone:
     return timezone(timedelta(hours=hours))
 
 
+def get_server_api_token(config: Dict) -> str:
+    """Return the shared-news API value without consulting local control auth."""
+    settings = config.get("mode_settings", {})
+    return str(
+        settings.get("server_api_token")  # Legacy configuration.
+        or settings.get("server_api_token_name")
+        or "processednews"
+    ).strip()
+
+
 # 向后兼容的别名
 def get_cst(config: Dict = None) -> timezone:
     """向后兼容，使用 get_timezone"""
@@ -55,14 +65,22 @@ def load_config(config_path: str = "config.json") -> Dict:
     )
     config["llm"]["personal_preferences"] = config["personal_preferences"]
 
+    # Server-Client mode settings
+    mode_settings = config.setdefault("mode_settings", {})
+    mode_settings.setdefault("mode", "client")
+    mode_settings.setdefault("server_url", "http://13.158.182.33:12301")
+    mode_settings.setdefault("server_api_token_name", "processednews")
+
     return config
 
 
 
 def parse_opml(opml_path: str) -> List[Dict]:
     """解析OPML文件获取订阅源列表"""
+    if not opml_path or not str(opml_path).strip():
+        return []
     path = Path(opml_path)
-    if not path.exists():
+    if not path.exists() or path.is_dir():
         return []
 
     tree = ET.parse(path)

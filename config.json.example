@@ -4,7 +4,7 @@
         "min_score": 60,
         "hot_threshold": 90,
         "context_days": 2,
-        "keep_days": 7,
+        "keep_days": 30,
         "push_context_days": 5,
         "no_content_marker": "[NO_NEW_CONTENT]"
     },
@@ -24,18 +24,16 @@
             {
                 "id": "morning",
                 "cron": "0 10 * * *",
-                "max_items": 10,
-                "sections": ["rss", "github", "hackernews", "insights"]
+                "max_items": 10
             },
             {
                 "id": "evening",
                 "cron": "0 20 * * *",
-                "max_items": 10,
-                "sections": ["rss"]
+                "max_items": 10
             }
         ],
         "immediate": {
-            "enabled": true,
+            "enabled": false,
             "threshold": 90,
             "daily_limit": 3
         }
@@ -142,6 +140,11 @@
             "apiKeyName": "CUSTOM_PUSH_URL",
             "tokenKeyName": "CUSTOM_PUSH_TOKEN"
         }
+    },
+    "mode_settings": {
+        "mode": "client",
+        "server_url": "http://13.158.182.33:12301",
+        "server_api_token_name": "processednews"
     },
     "sources": {
         "base_opml": "resources/rss.opml",

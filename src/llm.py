@@ -264,7 +264,7 @@ def _build_batch_prompt(
                 "title": e.get("title", "无标题"),
                 "source": e.get("source", "未知来源"),
                 "published": e.get("published", ""),
-                "content": e.get("content", "")[:2000],  # 限制内容长度
+                "content": e.get("content", "")[:1000],  # 限制内容长度至1000字
             }
         )
 
@@ -388,7 +388,7 @@ def _split_entries_for_batch(
                     "title": entry.get("title", "")[:100],
                     "source": entry.get("source", ""),
                     "published": entry.get("published", ""),
-                    "content": entry.get("content", "")[:2000],
+                    "content": entry.get("content", "")[:1000],
                 },
                 ensure_ascii=False,
             )

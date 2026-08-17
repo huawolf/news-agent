@@ -55,7 +55,7 @@ class JobExecutor:
         try:
             async with self._locks[kind]:
                 config = self.config_service.load()
-                with log_path.open("a", encoding="utf-8") as stream:
+                with log_path.open("a", encoding="utf-8", buffering=1) as stream:
                     stream.write(f"\n=== job {job_id} kind={kind} source={source} started {record['started_at']} ===\n")
                     stream.flush()
                     with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):

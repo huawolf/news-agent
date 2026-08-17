@@ -32,6 +32,42 @@ def get_notify_file(d: date = None, data_dir: str = "news-data") -> str:
     return f"{data_dir}/notify-{d.isoformat()}.md"
 
 
+def get_github_cache_file(data_dir: str = "news-data") -> str:
+    """Return the persistent latest successful GitHub section path."""
+    return f"{data_dir}/github-latest.md"
+
+
+def save_github_cache(content: str, data_dir: str = "news-data") -> None:
+    """Persist the latest non-empty GitHub section for shared clients."""
+    clean = str(content or "").strip()
+    if not clean:
+        return
+    path = Path(get_github_cache_file(data_dir))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(clean + "\n", encoding="utf-8")
+
+
+def load_github_cache(data_dir: str = "news-data") -> str:
+    """Load or bootstrap the latest successful GitHub section."""
+    path = Path(get_github_cache_file(data_dir))
+    if path.exists():
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+
+    data_path = Path(data_dir)
+    for push_file in sorted(data_path.glob("push-*.md"), reverse=True):
+        try:
+            _, body = parse_frontmatter(
+                push_file.read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError:
+            continue
+        github = extract_section(body, "github").strip()
+        if github:
+            save_github_cache(github, data_dir=data_dir)
+            return github
+    return ""
+
+
 def save_notify_file(
     filepath: str,
     content: str,
@@ -182,6 +218,47 @@ def load_recent_push_content(
         )
 
     return "\n\n------\n\n".join(bodies)
+
+
+def format_recent_push_summary_context(raw_text: str) -> str:
+    """将历史推送的原始 Markdown 提取并转换为简略列表格式 [Title | Link | Summary]，减少 LLM 查重 Token 占用。"""
+    if not raw_text or not raw_text.strip():
+        return ""
+
+    items = []
+    blocks = re.split(r"(?m)^###\s+", raw_text)
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.split("\n")
+        heading_line = lines[0].strip()
+        title = re.sub(r"^\d+\.\s*", "", heading_line).strip()
+
+        body_text = "\n".join(lines[1:]).strip()
+        links = re.findall(
+            r"\[(?:查看原文|Read original|原文链接)\s*\d*\]\((https?://[^\s\)]+)\)", body_text
+        )
+        link = ", ".join(links) if links else ""
+
+        clean_summary = re.sub(
+            r"\[(?:查看原文|Read original|原文链接)\s*\d*\]\([^\s\)]+\)", "", body_text
+        ).strip()
+        clean_summary = " ".join(clean_summary.split())
+
+        if title:
+            item_str = f"- Title: {title}"
+            if link:
+                item_str += f" | Link: {link}"
+            if clean_summary:
+                item_str += f" | Summary: {clean_summary}"
+            items.append(item_str)
+
+    if not items:
+        return raw_text.strip()
+
+    return "\n".join(items)
+
 
 
 def get_last_push_file(data_dir: str = "news-data") -> Optional[str]:
@@ -439,8 +516,8 @@ def load_existing_links(filepath: str, threshold: int = 150, data_dir: str = "ne
     return all_links
 
 
-def cleanup_old_files(days: int = 7, data_dir: str = "news-data"):
-    """清理超过days天的旧文件"""
+def cleanup_old_files(days: int = 30, data_dir: str = "news-data"):
+    """清理超过days天的旧文件及已发送历史记录"""
     data_path = Path(data_dir)
     if not data_path.exists():
         return
@@ -470,7 +547,8 @@ def cleanup_old_files(days: int = 7, data_dir: str = "news-data"):
             except (ValueError, OSError):
                 continue
 
-    # trending-history.json: 保持永久历史记录,不再剪枝过期条目
+    # 自动清理 sent-history.json 中超过 days 天的已发送记录
+    load_sent_links(days=days, data_dir=data_dir)
 
     if deleted_count > 0:
         print(f"   ✅ 清理完成: 删除了 {deleted_count} 个旧文件")

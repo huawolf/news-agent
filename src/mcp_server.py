@@ -85,7 +85,7 @@ def create_mcp_server():
 
     @mcp.tool()
     async def set_delivery_schedule(schedules: list[dict], timezone: str = "Asia/Shanghai") -> dict:
-        """Set delivery cron schedules. Each item needs id, cron, max_items, and sections."""
+        """Set delivery cron schedules. Each item needs id, cron, and max_items."""
         delivery = config_service.load()["delivery"]
         delivery["timezone"] = timezone
         delivery["schedules"] = schedules

@@ -30,13 +30,11 @@ DEFAULT_DELIVERY_SCHEDULES = (
         "id": "morning",
         "cron": "0 10 * * *",
         "max_items": 10,
-        "sections": ["rss", "github", "hackernews", "insights"],
     },
     {
         "id": "evening",
         "cron": "0 20 * * *",
         "max_items": 10,
-        "sections": ["rss"],
     },
 )
 
@@ -104,7 +102,12 @@ class ConfigService:
                 "diversity": {"max_per_source": 2, "max_per_topic": 3},
             },
             "delivery": {"timezone": "Asia/Shanghai", "schedules": [],
-                         "immediate": {"enabled": True, "threshold": 90, "daily_limit": 3}},
+                         "immediate": {"enabled": False, "threshold": 90, "daily_limit": 3}},
+            "mode_settings": {
+                "mode": "client",
+                "server_url": "http://13.158.182.33:12301",
+                "server_api_token_name": "processednews",
+            },
             "storage": {"data_dir": str(self.paths["news_data"])},
             "log": {"retention_days": 30},
         }
@@ -167,12 +170,13 @@ class ConfigService:
             old = config.get("schedule", {}).get("push_cron", [])
             delivery["schedules"] = [
                 {"id": "morning" if index == 0 else f"push-{index + 1}", "cron": cron,
-                 "max_items": 10,
-                 "sections": ["rss", "github", "hackernews", "insights"] if index == 0 else ["rss"]}
+                 "max_items": 10}
                 for index, cron in enumerate(old)
             ]
         elif not has_delivery_schedules and not has_legacy_push_cron:
             delivery["schedules"] = copy.deepcopy(list(DEFAULT_DELIVERY_SCHEDULES))
+        for schedule in delivery.get("schedules", []):
+            schedule.pop("sections", None)
         config["preferences"].setdefault("interests", [])
         config["preferences"].setdefault("avoid", [])
         if not has_personal_preferences:
@@ -201,6 +205,14 @@ class ConfigService:
             raise ConfigError("personal_preferences is too long")
         if config.get("output_language") not in {"en", "zh"}:
             raise ConfigError("output_language must be 'en' or 'zh'")
+        mode_settings = config.get("mode_settings", {})
+        if not isinstance(mode_settings, dict):
+            raise ConfigError("mode_settings must be an object")
+        if mode_settings.get("mode") not in {"standalone", "mix", "client"}:
+            raise ConfigError("mode_settings.mode must be 'standalone', 'mix', or 'client'")
+        server_url = urlparse(str(mode_settings.get("server_url", "")))
+        if server_url.scheme not in {"http", "https"} or not server_url.netloc:
+            raise ConfigError("mode_settings.server_url must be an http or https URL")
         llm = config.get("llm", {})
         if not isinstance(llm, dict):
             raise ConfigError("llm must be an object")
@@ -347,6 +359,8 @@ class ConfigService:
 
     def _write(self, config: dict) -> None:
         config = copy.deepcopy(config)
+        for schedule in config.get("delivery", {}).get("schedules", []):
+            schedule.pop("sections", None)
         if isinstance(config.get("llm"), dict):
             config["llm"].pop("output_language", None)
             config["llm"].pop("personal_preferences", None)

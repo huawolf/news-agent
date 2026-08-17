@@ -11,12 +11,17 @@ step from machine-readable responses.
 
 ## Guardrails
 
-- Run commands on the same machine as News Agent. The API binds to
-  `127.0.0.1:12301` and is not a remote control endpoint.
+- Run management commands on the same machine as News Agent. Regular clients
+  bind their control API to `127.0.0.1:12301`. A designated mix server may bind
+  externally for shared-news access, but its management routes must use a
+  private `NEWS_AGENT_LOCAL_TOKEN`.
 - Ask for missing product choices. Never invent a model, endpoint, credential,
   delivery destination, timezone, schedule, language, or ranking preference.
 - Treat API keys, webhook URLs, and `NEWS_AGENT_LOCAL_TOKEN` as secrets. Never
   print them, include them in logs or final responses, or commit `.env`.
+- Do not confuse authentication domains. `processednews` is the non-private
+  shared-news API value; `NEWS_AGENT_LOCAL_TOKEN` is the optional private
+  password for the local configuration and job-control API.
 - Preserve unrelated `.env` entries. Use a structured file-editing operation;
   do not rebuild the file with `echo`, shell interpolation, or a broad rewrite.
 - Do not edit `config.json` directly when a local API endpoint exists. API writes
@@ -65,6 +70,29 @@ After installation, resolve the actual project directory again before running
 
 ## 3. Collect Required Settings
 
+Regular user installations use the default client connection unless the user
+is explicitly operating the shared server:
+
+```json
+"mode_settings": {
+  "mode": "client",
+  "server_url": "http://13.158.182.33:12301",
+  "server_api_token_name": "processednews"
+}
+```
+
+Use `mix` only for the shared server operator. Use `standalone` only for an
+explicit self-contained deployment.
+Client mode retrieves shared entries with `score >= 60` and locally fetches/scores only
+custom RSS feeds absent from the server catalog. Manual and scheduled runs use
+the same pipeline: one unified news pool plus the server-provided GitHub digest.
+
+When starting a mix server for remote clients, bind it to an appropriate
+network interface, for example `news-agent serve --host 0.0.0.0 --port 12301`,
+and configure `NEWS_AGENT_LOCAL_TOKEN` before exposing the port. The public
+`processednews` value grants shared-news reads only and must not grant local
+configuration or job-control access.
+
 Obtain these values before configuring:
 
 1. LLM model name, endpoint, API-key environment variable name, and API key.
@@ -72,9 +100,9 @@ Obtain these values before configuring:
 3. Output language: `zh` or `en`.
 4. Natural-language ranking preferences.
 5. Delivery destination and its webhook or token.
-6. IANA timezone, cron schedules, sections, and `max_items` for each delivery.
+6. IANA timezone, cron schedules, and `max_items` for each delivery.
 
-Explain that `max_items` is the final delivery count. The RSS digest stage ranks
+Explain that `max_items` is the final news delivery count. The unified digest stage ranks
 all eligible fresh entries, gives up to `max_items * 3` leading candidates to the
 LLM, and asks it to compose at most `max_items` items.
 
@@ -111,7 +139,9 @@ secret literally in a process argument when a private file-editing tool is
 available.
 
 If `NEWS_AGENT_LOCAL_TOKEN` is set, include it as `X-News-Agent-Token` on every
-subsequent API request. Load it privately from `.env`; do not display it.
+subsequent local management API request. Load it privately from `.env`; do not
+display it. Do not use it as the client connection value: shared-news requests
+use `processednews` from `mode_settings.server_api_token_name`.
 
 ## 5. Verify Service Health
 
@@ -189,10 +219,9 @@ to preserve it unless the user asks to change it.
     "timezone": "Asia/Shanghai",
     "schedules": [
       {
-        "id": "morning",
+        "id": "delivery-1",
         "cron": "0 10 * * *",
-        "max_items": 5,
-        "sections": ["rss", "github", "hackernews", "insights"]
+        "max_items": 5
       }
     ]
   }
@@ -224,6 +253,13 @@ job to completion. Reconfirm the destination immediately before this call.
 Use `POST /api/jobs/run?confirm=true` only when the user explicitly requests one
 combined fetch-and-send operation. Never infer confirmation from an earlier
 configuration request.
+
+For a mix server, a successful full run must update the shared news pool and
+attempt GitHub generation regardless of the run time. Verify `app.log` contains
+`GH:` progress, inspect `news-data/github-latest.md`, and require
+`GET /api/server/github-trending` to return non-empty `github` before declaring
+the shared GitHub service healthy. Delivery schedule objects must contain only
+`id`, `cron`, and `max_items`; do not add legacy `sections` arrays.
 
 ## 9. MCP Handoff
 

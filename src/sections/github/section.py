@@ -18,8 +18,27 @@ from src.storage import load_trending_history
 async def run_github_section(
     config: Dict, now: Optional[datetime] = None
 ) -> Tuple[str, Optional[str]]:
+    mode = config.get("mode_settings", {}).get("mode", "client")
     cfg = config.get("sections", {}).get("github_trending", {})
-    if not cfg.get("enabled", False):
+    if mode != "client" and not cfg.get("enabled", False):
+        return "", None
+
+    if mode == "client":
+        print("🔌 Client Mode: fetching pre-compiled GitHub Trending from server...")
+        try:
+            from src.main import query_server_api
+            res = await query_server_api("/api/server/github-trending", config)
+            if res and res.get("found"):
+                github_md = res.get("github", "").strip()
+                if github_md:
+                    print("🔌 Retrieved pre-compiled GitHub Trending from server")
+                    return github_md, None
+                else:
+                    print("⚠️ Server pre-compiled GitHub Trending is empty")
+            else:
+                print("⚠️ Failed to retrieve pre-compiled GitHub Trending from server")
+        except Exception as e:
+            print(f"⚠️ Error querying server for GitHub Trending: {e}")
         return "", None
 
     # 延迟 import,Task 11 才提供 summarize_github_trending
