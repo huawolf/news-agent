@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+config.json
+docker-data
+news-data
+logs
+runs
+__pycache__
+*.py[cod]

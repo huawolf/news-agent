@@ -36,6 +36,7 @@ logs/
 
 # 数据文件
 news-data/
+docker-data/
 *.log
 
 
