@@ -163,7 +163,7 @@ def load_recent_notify_content(
 
     if loaded_files:
         print(
-            f"   📂 已加载 {len(loaded_files)} 个 notify 文件: {', '.join(loaded_files)}"
+            f"   📂 Loaded {len(loaded_files)} notify file(s): {', '.join(loaded_files)}"
         )
 
     return "\n\n------\n\n".join(blocks)
@@ -213,7 +213,7 @@ def load_recent_push_content(
 
     if loaded_files:
         print(
-            f"   📂 已加载 {len(loaded_files)} 个 push 文件 (section={section}): "
+            f"   📂 Loaded {len(loaded_files)} push file(s) (section={section}): "
             f"{', '.join(loaded_files)}"
         )
 
@@ -543,7 +543,7 @@ def cleanup_old_files(days: int = 30, data_dir: str = "news-data"):
                     if file_date < cutoff.date():
                         file.unlink()
                         deleted_count += 1
-                        print(f"   🗑️ 删除旧文件: {file.name}")
+                        print(f"   🗑️ Removed old file: {file.name}")
             except (ValueError, OSError):
                 continue
 
@@ -551,7 +551,7 @@ def cleanup_old_files(days: int = 30, data_dir: str = "news-data"):
     load_sent_links(days=days, data_dir=data_dir)
 
     if deleted_count > 0:
-        print(f"   ✅ 清理完成: 删除了 {deleted_count} 个旧文件")
+        print(f"   ✅ Cleanup complete: removed {deleted_count} old file(s)")
 
 
 def _normalize_url(url: str) -> str:
@@ -610,7 +610,7 @@ def load_trending_history(path: str) -> TrendingHistory:
             data = json.load(f)
         return TrendingHistory(path, data.get("repos", {}))
     except (json.JSONDecodeError, OSError):
-        print(f"⚠️ trending-history 读取失败,使用空索引: {path}")
+        print(f"⚠️ Failed to read trending history; using an empty index: {path}")
         return TrendingHistory(path, {})
 
 
@@ -697,7 +697,7 @@ def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
         with open(path, "r", encoding="utf-8") as f:
             history = json.load(f)
     except Exception as e:
-        print(f"⚠️ 读取 sent-history.json 失败: {e}")
+        print(f"⚠️ Failed to read sent-history.json: {e}")
         return set()
 
     # 清理过期条目
@@ -749,4 +749,4 @@ def mark_links_as_sent(links: List[str], data_dir: str = "news-data"):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"⚠️ 保存 sent-history.json 失败: {e}")
+        print(f"⚠️ Failed to save sent-history.json: {e}")

@@ -31,37 +31,37 @@ async def run_hackernews_section(
     jina_token_env = cfg.get("jinaTokenName", "JINA_API_KEY")
 
     # 1. 抓首页
-    print("📥 HN: 抓取首页...")
+    print("📥 HN: fetching the front page...")
     try:
         html = await fetch_frontpage(timeout=timeout)
     except Exception as e:
         err_msg = str(e) or e.__class__.__name__
-        return "", f"HN 首页抓取失败: {err_msg}"
+        return "", f"HN front page fetch failed: {err_msg}"
 
     front = parse_frontpage_html(html)
-    print(f"📋 HN: 解析 {len(front)} 条 frontpage stories")
+    print(f"📋 HN: parsed {len(front)} front-page stories")
     if not front:
         return "", None
 
     # 2. 轻 LLM 初筛
-    print(f"🤖 HN: 轻 LLM 初筛 (k={select_k})...")
+    print(f"🤖 HN: running lightweight LLM selection (k={select_k})...")
     selected_ids, select_err = await select_ai_related_hn(front, k=select_k, config=config["llm"])
     if select_err:
         return "", select_err
     if not selected_ids:
-        print("ℹ️ HN: 初筛未挑出 AI 相关内容,跳过")
+        print("ℹ️ HN: lightweight selection found no AI-related stories; skipping")
         return "", None
 
     selected = [s for s in front if s["id"] in set(selected_ids)]
     if not selected:
         return "", None
     print(
-        f"🎯 HN: 初筛选出 {len(selected)} 个: "
+        f"🎯 HN: lightweight selection chose {len(selected)} stories: "
         f"{', '.join(s['id'] for s in selected)}"
     )
 
     # 3. enrich
-    print(f"🌐 HN: enrich {len(selected)} 个 story (Algolia + 外链)...")
+    print(f"🌐 HN: enriching {len(selected)} stories (Algolia + external links)...")
     enriched, enrich_errors = await enrich_stories(
         selected,
         top_comments=top_comments,
@@ -76,16 +76,16 @@ async def run_hackernews_section(
     for e in enrich_errors:
         print(f"⚠️ HN enrich: {e}")
     print(
-        f"✅ HN: enrich 成功 {len(enriched)} / 失败 {len(enrich_errors)} / "
-        f"输入 {len(selected)}"
+        f"✅ HN: enrichment succeeded={len(enriched)} / failed={len(enrich_errors)} / "
+        f"input={len(selected)}"
     )
     if not enriched:
         return "", None
 
     # 4. LLM 总结
-    print(f"🤖 HN: summarize {len(enriched)} 个 enriched story...")
+    print(f"🤖 HN: summarizing {len(enriched)} enriched stories...")
     md, err = await summarize_hackernews(enriched, config["llm"])
     if err:
         return "", err
-    print(f"✅ HN: 板块输出 {len(md or '')} chars")
+    print(f"✅ HN: section output is {len(md or '')} characters")
     return md or "", None

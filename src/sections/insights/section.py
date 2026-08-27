@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-EMPTY_MARKER = "(本次无内容)"
+EMPTY_MARKER = "(No content this cycle)"
 
 
 async def run_insights_section(

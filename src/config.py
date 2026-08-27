@@ -54,7 +54,7 @@ def load_config(config_path: str = "config.json") -> Dict:
     """加载配置文件"""
     path = Path(config_path)
     if not path.exists():
-        raise FileNotFoundError(f"配置文件不存在: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with open(path, "r", encoding="utf-8") as f:
         config = json.load(f)

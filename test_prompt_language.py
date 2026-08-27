@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -19,6 +20,23 @@ PROMPT_FILES = (
     "prompts/translate_section.md",
 )
 CJK_TEXT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+RUNTIME_MESSAGE_FILES = (
+    "src/fetcher.py",
+    "src/llm.py",
+    "src/storage.py",
+    "src/push/__init__.py",
+    "src/push/custom.py",
+    "src/push/discord.py",
+    "src/push/feishu.py",
+    "src/sections/rss/section.py",
+    "src/sections/hackernews/section.py",
+    "src/sections/hackernews/item_enricher.py",
+    "src/sections/hackernews/frontpage_scraper.py",
+    "src/sections/github/section.py",
+    "src/sections/github/repo_enricher.py",
+    "src/sections/github/trending_scraper.py",
+    "src/config.py",
+)
 
 
 class PromptLanguageRegressionTests(unittest.TestCase):
@@ -51,6 +69,48 @@ class PromptLanguageRegressionTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(translated, second_draft)
         self.assertEqual(llm.await_count, 2)
+
+    def test_runtime_messages_are_english(self):
+        """Operational logs and raised errors must not leak untranslated CJK text."""
+        for relative_path in RUNTIME_MESSAGE_FILES:
+            source = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=relative_path)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    segment = ast.get_source_segment(source, node) or ""
+                    function_name = ""
+                    if isinstance(node.func, ast.Name):
+                        function_name = node.func.id
+                    elif isinstance(node.func, ast.Attribute):
+                        function_name = node.func.attr
+                    if function_name not in {
+                        "append",
+                        "error",
+                        "exception",
+                        "info",
+                        "print",
+                        "warning",
+                        "_llm_error_message",
+                    }:
+                        continue
+                    if function_name == "append" and "errors.append" not in segment:
+                        continue
+                elif isinstance(node, ast.Raise):
+                    pass
+                else:
+                    continue
+
+                with self.subTest(file=relative_path, line=node.lineno):
+                    self.assertNotRegex(segment, CJK_TEXT)
+
+    def test_batch_mismatch_message_is_english(self):
+        from src.llm import _reconcile_batch_results
+
+        entries = [{"link": "https://example.com/item"}]
+        matched, errors = _reconcile_batch_results(entries, [], batch_index=10)
+
+        self.assertEqual(matched, [])
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

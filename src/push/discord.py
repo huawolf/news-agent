@@ -36,7 +36,7 @@ class DiscordPlatform(PushPlatform):
                 async with session.post(self.webhook_url, json=payload) as resp:
                     if resp.status != 204:
                         text = await resp.text()
-                        raise RuntimeError(f"Discord推送失败: {resp.status} - {text}")
+                        raise RuntimeError(f"Discord delivery failed: {resp.status} - {text}")
 
     def _split_content(self, content: str, limit: int = 2000) -> list:
         """Discord限制2000字符，需要分割"""

@@ -17,7 +17,7 @@ def create_platform(name: str, config: Dict) -> Optional[PushPlatform]:
     }
 
     if name not in platforms:
-        raise ValueError(f"未知推送平台: {name}")
+        raise ValueError(f"Unknown delivery platform: {name}")
 
     platform_class = platforms[name]
     platform = platform_class(config)
@@ -37,6 +37,6 @@ async def send_to_platforms(content: str, push_config: Dict, title: str = None, 
 
         try:
             await platform.send(content, title, metadata)
-            print(f"✅ 已推送到 {platform_name}")
+            print(f"✅ Delivered to {platform_name}")
         except Exception as e:
-            print(f"❌ 推送到 {platform_name} 失败: {e}")
+            print(f"❌ Delivery to {platform_name} failed: {e}")

@@ -90,7 +90,7 @@ def _parse_feed_entries(content, feed_info: Dict, cutoff_time: datetime) -> List
 
         entries.append(
             {
-                "title": _truncate_title(entry.get("title", "无标题")),
+                "title": _truncate_title(entry.get("title", "Untitled")),
                 "link": entry.get("link", ""),
                 "published": pub_date,
                 "source": feed_info["title"],
@@ -116,7 +116,7 @@ async def _fetch_nitter_content(url: str, timeout: int) -> Optional[bytes]:
                 return None
             return r.content
         except Exception as e:
-            print(f"⚠️ nitter 抓取失败 {url}: {e}")
+            print(f"⚠️ nitter fetch failed for {url}: {e}")
             return None
 
     return await asyncio.to_thread(_sync)
@@ -171,7 +171,7 @@ async def fetch_single_feed_async(
         return _parse_feed_entries(content, feed_info, cutoff_time)
     except Exception as e:
         err_msg = str(e) or type(e).__name__
-        print(f"⚠️ 获取失败 {feed_info['title']}: {err_msg}")
+        print(f"⚠️ Fetch failed for {feed_info['title']}: {err_msg}")
         return []
 
 
@@ -210,7 +210,7 @@ async def fetch_all_feeds(
     for feed, result in zip(ordered_feeds, results):
         if isinstance(result, Exception):
             err_msg = str(result) or type(result).__name__
-            print(f"⚠️ 获取失败 {feed['title']}: {err_msg}")
+            print(f"⚠️ Fetch failed for {feed['title']}: {err_msg}")
         else:
             all_entries.extend(result)
 
@@ -226,7 +226,7 @@ async def fetch_hackernews_entries(
         from src.sections.hackernews.item_enricher import _fetch_algolia_item, _collect_comments_tree
         from src.processor import html_to_markdown
     except ImportError as e:
-        print(f"⚠️ HN fetcher 依赖加载失败: {e}")
+        print(f"⚠️ HN fetcher dependency loading failed: {e}")
         return []
 
     cfg = config.get("sections", {}).get("hackernews", {})
@@ -238,18 +238,18 @@ async def fetch_hackernews_entries(
     comments_total_chars = cfg.get("comments_total_chars", 80000)
     timeout = cfg.get("request_timeout", 10)
 
-    print("📥 HN: 抓取首页...")
+    print("📥 HN: fetching front page...")
     try:
         html = await fetch_frontpage(timeout=timeout)
         stories = parse_frontpage_html(html)[:max_items]
     except Exception as e:
-        print(f"⚠️ HN frontpage 抓取失败: {e}")
+        print(f"⚠️ HN front page fetch failed: {e}")
         return []
 
     if not stories:
         return []
 
-    print(f"📋 HN: 并发获取 {len(stories)} 条 story 的 Algolia 详细内容与热门评论...")
+    print(f"📋 HN: fetching Algolia details and top comments for {len(stories)} stories...")
     async with aiohttp.ClientSession(
         headers={"User-Agent": "Mozilla/5.0"}, trust_env=True
     ) as session:
