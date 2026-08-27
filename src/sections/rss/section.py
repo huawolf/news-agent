@@ -90,7 +90,7 @@ async def run_rss_section(
     )
 
     if not to_push:
-        print("ℹ️ RSS: 无新消息")
+        print("ℹ️ RSS: no new content")
         return "", None, None
 
     candidate_limit = target_items * 3
@@ -113,7 +113,7 @@ async def run_rss_section(
             max_items=target_items,
         )
     except Exception as e:
-        msg = _llm_error_message("compose_digest 失败", e)
+        msg = _llm_error_message("Digest composition failed", e)
         print(f"⚠️ RSS: {msg}")
         return "", None, msg
 

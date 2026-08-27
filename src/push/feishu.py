@@ -35,10 +35,10 @@ class FeishuPlatform(PushPlatform):
                 async with session.post(self.webhook_url, json=payload) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        raise RuntimeError(f"飞书推送失败: {resp.status} - {text}")
+                        raise RuntimeError(f"Feishu delivery failed: {resp.status} - {text}")
                     data = await resp.json()
                     if data.get("code") != 0:
-                        raise RuntimeError(f"飞书推送失败: {data.get('msg')}")
+                        raise RuntimeError(f"Feishu delivery failed: {data.get('msg')}")
 
     def _build_payload(self, content: str, title: str = None) -> Dict:
         """

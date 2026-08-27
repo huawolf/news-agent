@@ -36,7 +36,7 @@ async def fetch_trending_page(timeout: int = 10) -> str:
             if resp.status != 200:
                 text = await resp.text()
                 raise RuntimeError(
-                    f"GitHub trending 返回 {resp.status}: {text[:200]}"
+                    f"GitHub trending returned {resp.status}: {text[:200]}"
                 )
             return await resp.text()
 

@@ -12,7 +12,8 @@ from typing import Dict, List, Optional
 # Load .env file.
 from dotenv import load_dotenv
 
-load_dotenv()
+_env_path = Path(os.environ.get("NEWS_AGENT_DATA_DIR", ".")) / ".env"
+load_dotenv(_env_path if _env_path.exists() else None)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

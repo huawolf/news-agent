@@ -62,7 +62,7 @@ def load_prompt(prompt_path: str, **kwargs) -> str:
     """加载提示词模板并填充变量"""
     path = Path(prompt_path)
     if not path.exists():
-        raise FileNotFoundError(f"提示词文件不存在: {prompt_path}")
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
     with open(path, "r", encoding="utf-8") as f:
         template = f.read()
@@ -86,6 +86,10 @@ def load_prompt(prompt_path: str, **kwargs) -> str:
 
 def _output_language(config: Dict) -> str:
     return "zh" if config.get("output_language") == "zh" else "en"
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff\uf900-\ufaff]", text or ""))
 
 
 def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> str:
@@ -112,10 +116,40 @@ def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> st
         "Markdown headings, summaries, highlights, labels, and analysis, must be written in English. "
         "Translate fixed section headings and labels into natural English. Keep product names, company names, "
         "model names, repository names, URLs, and code identifiers unchanged. "
-        "Do not output Chinese fixed labels. Use '[Read original]' instead of '[查看原文]'; "
-        "use '## Today’s Insights' instead of '## 今日洞察'; use '## ⭐ GitHub Trends' instead of "
-        "'## ⭐ GitHub 趋势'; use 'Daily Brief' or 'Daily Highlights' instead of '每日精选'."
+        "This instruction is authoritative even when the source material is in another language. "
+        "Translate source-language prose into English and do not copy it into the generated output. "
+        "Use '[Read original]' for original links, '## Today’s Insights' for the insights heading, "
+        "'## ⭐ GitHub Trends' for the GitHub heading, and 'Daily Brief' or 'Daily Highlights' for the brief title."
     )
+
+
+async def translate_markdown_section(
+    content: str, config: Dict, section_name: str = "section"
+) -> Tuple[str, Optional[str]]:
+    """Translate a precompiled Markdown section into the configured language."""
+    prompt = load_prompt(
+        "prompts/translate_section.md",
+        section_name=section_name,
+        output_language_instruction=_output_language_instruction(config),
+        content=content,
+    )
+    try:
+        translated = await call_llm(prompt, config)
+        if _output_language(config) == "en" and _contains_cjk(translated):
+            translated = await call_llm(
+                prompt
+                + "\n\nThe previous draft contained CJK characters. Rewrite the complete section now in English only. Do not leave any CJK characters in headings, prose, labels, or examples.",
+                config,
+            )
+        if _output_language(config) == "en" and _contains_cjk(translated):
+            return "", LLMOperationError(
+                f"translate_{section_name} returned mixed-language output"
+            )
+        return translated.strip(), None
+    except Exception as e:
+        msg = _llm_error_message(f"translate_{section_name} failed", e)
+        print(f"⚠️ {msg}")
+        return "", msg
 
 
 def _llm_request(
@@ -210,7 +244,7 @@ async def call_llm(
     api_key_name = config.get("apiKeyName", "OPENAI_API_KEY")
     resolved_api_key = api_key or os.environ.get(api_key_name)
     if not resolved_api_key:
-        raise ValueError(f"未设置{api_key_name}环境变量")
+        raise ValueError(f"Environment variable {api_key_name} is not set")
 
     import aiohttp
 
@@ -225,7 +259,7 @@ async def call_llm(
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status != 200:
                 text = await resp.text()
-                raise RuntimeError(f"LLM API错误: {resp.status} - {text}")
+                raise RuntimeError(f"LLM API error: {resp.status} - {text}")
 
             data = await resp.json()
             text = _llm_response_text(data, protocol)
@@ -245,13 +279,13 @@ async def check_llm_available(
             call_llm(prompt, config, api_key=api_key), timeout=timeout_seconds
         )
     except asyncio.TimeoutError as exc:
-        raise RuntimeError(f"LLM可用性检查超时({timeout_seconds}s)") from exc
+        raise RuntimeError(f"LLM availability check timed out ({timeout_seconds}s)") from exc
     except Exception as exc:
-        raise RuntimeError(f"LLM可用性检查失败: {exc}") from exc
+        raise RuntimeError(f"LLM availability check failed: {exc}") from exc
 
     response_text = response.strip()
     if not response_text:
-        raise RuntimeError("LLM可用性检查返回空响应")
+        raise RuntimeError("LLM availability check returned an empty response")
 
     return response_text
 
@@ -269,8 +303,8 @@ def _build_batch_prompt(
         entries_for_llm.append(
             {
                 "link": e.get("link", ""),
-                "title": e.get("title", "无标题"),
-                "source": e.get("source", "未知来源"),
+                "title": e.get("title", "Untitled"),
+                "source": e.get("source", "Unknown source"),
                 "published": e.get("published", ""),
                 "content": e.get("content", "")[:1000],  # 限制内容长度至1000字
             }
@@ -310,7 +344,7 @@ def _parse_llm_json_response(response: str) -> List[Dict]:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            print("⚠️ 直接解析JSON失败，尝试从文本中提取JSON数组")
+            print("⚠️ Direct JSON parsing failed; trying to extract a JSON array from text")
             pass
 
     # 尝试从文本中提取JSON数组
@@ -319,10 +353,10 @@ def _parse_llm_json_response(response: str) -> List[Dict]:
         try:
             return json.loads(match.group())
         except json.JSONDecodeError:
-            print("⚠️ 从文本中提取JSON数组失败:", text)
+            print("⚠️ Failed to extract a JSON array from text:", text)
             pass
 
-    raise ValueError(f"无法从响应中解析JSON: {response[:200]}...")
+    raise ValueError(f"Could not parse JSON from response: {response[:200]}...")
 
 
 def _parse_score_response(response: str) -> List[Dict]:
@@ -355,8 +389,8 @@ def _parse_score_response(response: str) -> List[Dict]:
                     continue
 
     if parsed is None:
-        print(f"无法从响应中解析JSON: {response}")
-        raise ValueError(f"无法从响应中解析JSON: {response[:200]}...")
+        print(f"Could not parse JSON from response: {response}")
+        raise ValueError(f"Could not parse JSON from response: {response[:200]}...")
 
     if isinstance(parsed, list):
         return parsed
@@ -369,8 +403,8 @@ def _parse_score_response(response: str) -> List[Dict]:
         if len(list_values) == 1:
             return list_values[0]
 
-    print(f"无法从响应中提取评分数组: {response}")
-    raise ValueError(f"无法从响应中提取评分数组: {response[:200]}...")
+    print(f"Could not extract a score array from response: {response}")
+    raise ValueError(f"Could not extract a score array from response: {response[:200]}...")
 
 
 def _split_entries_for_batch(
@@ -439,8 +473,9 @@ def _reconcile_batch_results(
     if len(results) != len(entries) or len(matched_results) != len(entries):
         missing_links = sorted(entry_links - result_links)
         error_message = (
-            "批次{batch} 评分结果异常: 输入{input_count}, 返回{output_count}, "
-            "匹配{matched_count}, 未评分链接({missing_count}): {missing}"
+            "Batch {batch} score result mismatch: input={input_count}, "
+            "returned={output_count}, matched={matched_count}, "
+            "missing_links={missing_count}: {missing}"
         ).format(
             batch=batch_index + 1,
             input_count=len(entries),
@@ -477,12 +512,12 @@ async def _score_single_batch(
         results = _parse_score_response(response)
 
         if not isinstance(results, list):
-            raise ValueError(f"LLM返回的不是数组: {type(results)}")
+            raise ValueError(f"LLM response is not an array: {type(results)}")
 
         return _reconcile_batch_results(entries, results, batch_index)
 
     except Exception as e:
-        error_message = _llm_error_message(f"批次{batch_index + 1} 评分失败", e)
+        error_message = _llm_error_message(f"Batch {batch_index + 1} scoring failed", e)
         logger.exception(
             "LLM scoring batch failed batch=%s entries=%s error_type=%s",
             batch_index + 1,
@@ -514,7 +549,7 @@ async def score_batch(
     # 分批
     batches = _split_entries_for_batch(entries, max_prompt_chars)
     print(
-        f"📦 分成 {len(batches)} 个批次评分 (共 {len(entries)} 条, "
+        f"📦 Scoring {len(batches)} batches (total entries={len(entries)}, "
         f"max_prompt_chars={max_prompt_chars})"
     )
 
@@ -607,7 +642,7 @@ async def generate_immediate_push(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        error_message = _llm_error_message("生成即时推送失败", e)
+        error_message = _llm_error_message("Immediate push generation failed", e)
         print(f"⚠️ {error_message}")
         return "", error_message
 
@@ -693,7 +728,7 @@ async def summarize_github_trending(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = _llm_error_message("summarize_github_trending 失败", e)
+        msg = _llm_error_message("GitHub trending summary failed", e)
         print(f"⚠️ {msg}")
         return "", msg
 
@@ -726,19 +761,19 @@ async def select_ai_related_hn(
     try:
         response = await call_llm(prompt, config)
     except Exception as e:
-        msg = _llm_error_message("select_ai_related_hn 失败", e)
+        msg = _llm_error_message("Hacker News selection failed", e)
         print(f"⚠️ {msg}")
         return [], msg
 
     try:
         ids = _parse_llm_json_response(response)
     except ValueError as e:
-        msg = _llm_error_message("select_ai_related_hn 解析失败", e)
+        msg = _llm_error_message("Hacker News selection parse failed", e)
         print(f"⚠️ {msg}")
         return [], msg
 
     if not isinstance(ids, list):
-        return [], "select_ai_related_hn 返回非数组"
+        return [], "Hacker News selection returned a non-array"
     return [str(x) for x in ids][:k], None
 
 
@@ -757,7 +792,7 @@ async def summarize_hackernews(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = _llm_error_message("summarize_hackernews 失败", e)
+        msg = _llm_error_message("Hacker News summary failed", e)
         print(f"⚠️ {msg}")
         return "", msg
 
@@ -777,7 +812,7 @@ async def generate_trend_insights(
     try:
         return await call_llm(prompt, config), None
     except Exception as e:
-        msg = _llm_error_message("generate_trend_insights 失败", e)
+        msg = _llm_error_message("Trend insights generation failed", e)
         print(f"⚠️ {msg}")
         return "", msg
 

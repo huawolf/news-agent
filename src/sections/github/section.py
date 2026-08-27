@@ -31,6 +31,18 @@ async def run_github_section(
             if res and res.get("found"):
                 github_md = res.get("github", "").strip()
                 if github_md:
+                    # Client-mode GitHub content is precompiled by the shared
+                    # server, whose output language may differ from this
+                    # client's language setting. Translate it locally when an
+                    # LLM is configured so the rendered sections stay consistent.
+                    if config.get("output_language") == "en":
+                        from src.llm import translate_markdown_section
+
+                        github_md, translation_error = await translate_markdown_section(
+                            github_md, config["llm"], "GitHub Trending"
+                        )
+                        if translation_error:
+                            return github_md, translation_error
                     print("🔌 Retrieved pre-compiled GitHub Trending from server")
                     return github_md, None
                 else:
@@ -53,15 +65,15 @@ async def run_github_section(
     token_env = cfg.get("tokenName", "GITHUB_TOKEN")
 
     # 1. 抓取
-    print("📥 GH: 抓取 trending 页...")
+    print("📥 GH: fetching the trending page...")
     try:
         html = await fetch_trending_page(timeout=timeout)
     except Exception as e:
         err_msg = str(e) or e.__class__.__name__
-        return "", f"GH 抓取失败: {err_msg}"
+        return "", f"GH fetch failed: {err_msg}"
 
     all_repos = parse_trending_html(html)
-    print(f"📋 GH: 解析 {len(all_repos)} 个 repo")
+    print(f"📋 GH: parsed {len(all_repos)} repositories")
     if not all_repos:
         return "", None
 
@@ -77,13 +89,19 @@ async def run_github_section(
             already_seen += 1
         else:
             candidates.append(repo)
-    print(f"🔍 GH: history 过滤掉 {already_seen} 条已见,新候选 {len(candidates)} 条")
+    print(
+        f"🔍 GH: history skipped {already_seen} seen repositories; "
+        f"{len(candidates)} new candidates"
+    )
 
     if not candidates:
-        print("ℹ️ GH: 无新候选,跳过")
+        print("ℹ️ GH: no new candidates; skipping")
         return "", None
     if len(candidates) > max_deep_dive:
-        print(f"✂️ GH: 候选 {len(candidates)} 超 max_deep_dive={max_deep_dive},截断")
+        print(
+            f"✂️ GH: {len(candidates)} candidates exceed "
+            f"max_deep_dive={max_deep_dive}; truncating"
+        )
         candidates = candidates[:max_deep_dive]
 
     # 4. 候选写回 history + 持久化
@@ -92,7 +110,7 @@ async def run_github_section(
     history.save()
 
     # 5. 并发 enrich
-    print(f"🌐 GH: 并发 enrich {len(candidates)} 个 repo (REST API)...")
+    print(f"🌐 GH: enriching {len(candidates)} repositories concurrently (REST API)...")
     enriched, enrich_errors = await enrich_repos(
         candidates,
         token_env=token_env,
@@ -102,16 +120,16 @@ async def run_github_section(
     for e in enrich_errors:
         print(f"⚠️ GH enrich: {e}")
     print(
-        f"✅ GH: enrich 成功 {len(enriched)} / 失败 {len(enrich_errors)} / "
-        f"输入 {len(candidates)}"
+        f"✅ GH: enrichment succeeded={len(enriched)} / failed={len(enrich_errors)} / "
+        f"input={len(candidates)}"
     )
     if not enriched:
         return "", None
 
     # 6. LLM 总结
-    print(f"🤖 GH: summarize {len(enriched)} 个候选...")
+    print(f"🤖 GH: summarizing {len(enriched)} candidates...")
     md, err = await summarize_github_trending(enriched, config["llm"])
     if err:
         return "", err
-    print(f"✅ GH: 板块输出 {len(md or '')} chars")
+    print(f"✅ GH: section output is {len(md or '')} characters")
     return md or "", None

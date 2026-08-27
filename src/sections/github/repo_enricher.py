@@ -18,9 +18,9 @@ def _auth_headers(token_env: str = "GITHUB_TOKEN") -> Dict[str, str]:
     token = os.environ.get(token_env)
     if token:
         headers["Authorization"] = f"Bearer {token}"
-        print(f"🔑 GH: 已配置 {token_env},鉴权调用 (5000 req/hr)")
+        print(f"🔑 GH: {token_env} is configured; authenticated requests (5000 req/hr)")
     else:
-        print(f"⚠️ GH: 未配置 {token_env},匿名调用 (60 req/hr)")
+        print(f"⚠️ GH: {token_env} is not configured; anonymous requests (60 req/hr)")
     return headers
 
 
@@ -105,7 +105,7 @@ async def enrich_repos(
     enriched: List[Dict] = []
     for r, candidate in zip(results, candidates):
         if isinstance(r, Exception):
-            errors.append(f"enrich {candidate['full_name']} 失败: {r}")
+            errors.append(f"enrich {candidate['full_name']} failed: {r}")
         elif r is not None:
             enriched.append(r)
     return enriched, errors

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values, set_key, unset_key
 
-from src.runtime import PROJECT_ROOT
+from src.runtime import PROJECT_ROOT, user_data_dir
 
 
 _VARIABLE_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
@@ -20,7 +20,7 @@ class EnvironmentService:
     """Expose .env metadata without exposing its values."""
 
     def __init__(self, path: Path | None = None):
-        self.path = path or PROJECT_ROOT / ".env"
+        self.path = path or user_data_dir() / ".env"
         self.template_path = PROJECT_ROOT / ".env.example"
 
     def status(self, config: dict) -> dict:

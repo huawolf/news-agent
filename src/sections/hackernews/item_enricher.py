@@ -41,7 +41,7 @@ async def _fetch_algolia_item(
         url, timeout=aiohttp.ClientTimeout(total=timeout)
     ) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"Algolia /items/{item_id} 返回 {resp.status}")
+            raise RuntimeError(f"Algolia /items/{item_id} returned {resp.status}")
         return await resp.json()
 
 
@@ -52,7 +52,7 @@ async def _fetch_url_html(
         url, timeout=aiohttp.ClientTimeout(total=timeout)
     ) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"外链 {url} 返回 {resp.status}")
+            raise RuntimeError(f"External link {url} returned {resp.status}")
         return await resp.text()
 
 
@@ -72,7 +72,7 @@ async def _fetch_via_jina(
         jina_url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)
     ) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"Jina Reader {url} 返回 {resp.status}")
+            raise RuntimeError(f"Jina Reader {url} returned {resp.status}")
         return await resp.text()
 
 
@@ -206,9 +206,12 @@ async def enrich_stories(
     """并发 enrich 多个 stories。"""
     errors: List[str] = []
     if os.environ.get(jina_token_env):
-        print(f"🔑 HN: 已配置 {jina_token_env},Jina Reader 鉴权调用")
+        print(f"🔑 HN: {jina_token_env} is configured; using authenticated Jina Reader")
     else:
-        print(f"⚠️ HN: 未配置 {jina_token_env},Jina Reader 匿名调用 (额度受限)")
+        print(
+            f"⚠️ HN: {jina_token_env} is not configured; using anonymous "
+            "Jina Reader (quota limited)"
+        )
     async with aiohttp.ClientSession(
         headers={"User-Agent": USER_AGENT}, trust_env=True
     ) as session:
@@ -233,7 +236,7 @@ async def enrich_stories(
     enriched: List[Dict] = []
     for r, src in zip(results, stories):
         if isinstance(r, Exception):
-            errors.append(f"enrich story {src['id']} 失败: {r}")
+            errors.append(f"enrich story {src['id']} failed: {r}")
         else:
             enriched.append(r)
     return enriched, errors

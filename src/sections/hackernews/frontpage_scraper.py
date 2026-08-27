@@ -30,7 +30,7 @@ async def fetch_frontpage(timeout: int = 10) -> str:
             FRONTPAGE_URL, timeout=aiohttp.ClientTimeout(total=timeout)
         ) as resp:
             if resp.status != 200:
-                raise RuntimeError(f"HN frontpage 返回 {resp.status}")
+                raise RuntimeError(f"HN front page returned {resp.status}")
             return await resp.text()
 
 
