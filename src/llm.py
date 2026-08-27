@@ -88,6 +88,10 @@ def _output_language(config: Dict) -> str:
     return "zh" if config.get("output_language") == "zh" else "en"
 
 
+def _contains_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff\uf900-\ufaff]", text or ""))
+
+
 def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> str:
     if _output_language(config) == "zh":
         if json_mode:
@@ -112,10 +116,40 @@ def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> st
         "Markdown headings, summaries, highlights, labels, and analysis, must be written in English. "
         "Translate fixed section headings and labels into natural English. Keep product names, company names, "
         "model names, repository names, URLs, and code identifiers unchanged. "
-        "Do not output Chinese fixed labels. Use '[Read original]' instead of '[查看原文]'; "
-        "use '## Today’s Insights' instead of '## 今日洞察'; use '## ⭐ GitHub Trends' instead of "
-        "'## ⭐ GitHub 趋势'; use 'Daily Brief' or 'Daily Highlights' instead of '每日精选'."
+        "This instruction is authoritative even when the source material is in another language. "
+        "Translate source-language prose into English and do not copy it into the generated output. "
+        "Use '[Read original]' for original links, '## Today’s Insights' for the insights heading, "
+        "'## ⭐ GitHub Trends' for the GitHub heading, and 'Daily Brief' or 'Daily Highlights' for the brief title."
     )
+
+
+async def translate_markdown_section(
+    content: str, config: Dict, section_name: str = "section"
+) -> Tuple[str, Optional[str]]:
+    """Translate a precompiled Markdown section into the configured language."""
+    prompt = load_prompt(
+        "prompts/translate_section.md",
+        section_name=section_name,
+        output_language_instruction=_output_language_instruction(config),
+        content=content,
+    )
+    try:
+        translated = await call_llm(prompt, config)
+        if _output_language(config) == "en" and _contains_cjk(translated):
+            translated = await call_llm(
+                prompt
+                + "\n\nThe previous draft contained CJK characters. Rewrite the complete section now in English only. Do not leave any CJK characters in headings, prose, labels, or examples.",
+                config,
+            )
+        if _output_language(config) == "en" and _contains_cjk(translated):
+            return "", LLMOperationError(
+                f"translate_{section_name} returned mixed-language output"
+            )
+        return translated.strip(), None
+    except Exception as e:
+        msg = _llm_error_message(f"translate_{section_name} 失败", e)
+        print(f"⚠️ {msg}")
+        return "", msg
 
 
 def _llm_request(

@@ -31,6 +31,18 @@ async def run_github_section(
             if res and res.get("found"):
                 github_md = res.get("github", "").strip()
                 if github_md:
+                    # Client-mode GitHub content is precompiled by the shared
+                    # server, whose output language may differ from this
+                    # client's language setting. Translate it locally when an
+                    # LLM is configured so the rendered sections stay consistent.
+                    if config.get("output_language") == "en":
+                        from src.llm import translate_markdown_section
+
+                        github_md, translation_error = await translate_markdown_section(
+                            github_md, config["llm"], "GitHub Trending"
+                        )
+                        if translation_error:
+                            return github_md, translation_error
                     print("🔌 Retrieved pre-compiled GitHub Trending from server")
                     return github_md, None
                 else:

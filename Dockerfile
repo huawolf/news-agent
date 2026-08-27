@@ -10,6 +10,7 @@ COPY src ./src
 COPY prompts ./prompts
 COPY resources ./resources
 COPY config.json.example README.md LICENSE ./
+COPY test_prompt_language.py ./
 
 RUN python -m pip install --no-cache-dir .
 
