@@ -1,0 +1,12 @@
+services:
+  news-agent:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:12301:12301"
+    environment:
+      NEWS_AGENT_DATA_DIR: /data
+      NEWS_AGENT_CONFIG: /data/config.json
+    volumes:
+      - ./docker-data:/data
+    restart: unless-stopped
