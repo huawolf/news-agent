@@ -4,6 +4,10 @@ import asyncio
 import logging
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 logger = logging.getLogger("news_agent.server")
 from contextlib import asynccontextmanager
 from datetime import datetime

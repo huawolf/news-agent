@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 # Load .env file.
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,23 +38,28 @@ from src.sections.signals.google_news import fetch_google_news_entries
 from src.storage import (
     append_entries,
     assemble_with_sentinels,
+    canonical_url,
     cleanup_old_files,
+    extract_urls_from_markdown,
+    filter_github_section,
+    format_recent_push_summary_context,
     get_fetch_file,
-    load_github_cache,
+    get_last_push_file,
     get_notify_file,
     get_push_file,
-    load_existing_links,
-    format_recent_push_summary_context,
+    is_link_sent,
     limit_delivery_items,
+    load_existing_links,
+    load_github_cache,
     load_recent_notify_content,
     load_recent_push_content,
-    read_entries,
-    save_notify_file,
-    save_github_cache,
-    save_push_file,
     load_sent_links,
+    load_trending_history,
     mark_links_as_sent,
-    get_last_push_file,
+    read_entries,
+    save_github_cache,
+    save_notify_file,
+    save_push_file,
     extract_push_time,
 )
 
@@ -362,7 +367,7 @@ async def collect_entries_for_push(
     cutoff_filtered = 0
     for entry in qualified_entries:
         link = entry.get("link")
-        if link and link in sent_links:
+        if link and is_link_sent(link, sent_links):
             sent_filtered += 1
             continue
 
@@ -750,11 +755,12 @@ async def run_fetch_job(config: Dict):
             print(f"💾 Saved immediate delivery to {notify_file}")
 
             # 4. Record sent links in sent-history.json.
-            sent_links = links_present_in_content(hot_entries, content_without_title)
+            sent_links = extract_urls_from_markdown(content_without_title)
+            if not sent_links:
+                sent_links = links_present_in_content(hot_entries, content_without_title)
             mark_links_as_sent(sent_links, data_dir=config.get("storage", {}).get("data_dir", "news-data"))
             print(
-                f"💾 Recorded {len(sent_links)} actually delivered immediate links "
-                f"({len(hot_entries) - len(sent_links)} candidates not marked)"
+                f"💾 Recorded {len(sent_links)} actually delivered immediate links"
             )
 
     print(f"✅ Fetch job completed | new entries: {len(scored)} | hot entries: {len(hot_entries)}")
@@ -781,9 +787,25 @@ async def run_push_job(config: Dict):
             title = digest_data.get("title", "")
             metadata = digest_data.get("metadata", {})
             if content:
+                data_dir = config.get("storage", {}).get("data_dir", "news-data")
+                sent_links = load_sent_links(days=3, data_dir=data_dir)
+                digest_urls = extract_urls_from_markdown(content)
+                if digest_urls and all(is_link_sent(u, sent_links) for u in digest_urls):
+                    print("ℹ️ Pre-compiled digest from server has already been delivered today; skipping duplicate delivery")
+                    return
                 print(f"🔌 Retrieved pre-compiled digest from server: '{title}'")
                 await send_to_platforms(content, config["push"], title=title, metadata=metadata)
                 print("✅ Pre-compiled digest successfully delivered")
+                push_file = get_push_file(data_dir=data_dir)
+                save_push_file(
+                    push_file,
+                    content,
+                    content.count("###"),
+                    content.count("###"),
+                    profile="default",
+                    metadata=metadata,
+                )
+                mark_links_as_sent(digest_urls, data_dir=data_dir)
                 return
             else:
                 print("⚠️ Pre-compiled digest content is empty")
@@ -791,7 +813,14 @@ async def run_push_job(config: Dict):
             print("⚠️ Failed to retrieve pre-compiled digest from server")
         return
 
-    await _run_unified_push(config)
+    policy = active_delivery_schedule(config, now_local(config))
+    use_extended_sections = bool(policy.get("sections")) and any(
+        section != "rss" for section in policy["sections"]
+    )
+    if mode == "client" or use_extended_sections or (not policy and is_morning_push(now_local(config), config)):
+        await _run_morning_push(config)
+    else:
+        await _run_default_push(config)
 
 
 async def _run_unified_push(config: Dict):
@@ -819,12 +848,22 @@ async def _run_unified_push(config: Dict):
 
     data_dir = config.get("storage", {}).get("data_dir", "news-data")
     mode = config.get("mode_settings", {}).get("mode", "client")
+    history_file = config.get("sections", {}).get("github_trending", {}).get(
+        "history_file", f"{data_dir}/trending-history.json"
+    )
+    sent_links = load_sent_links(days=3, data_dir=data_dir)
+
+    if gh_md:
+        gh_md = filter_github_section(gh_md, sent_links, history_file)
+
     if gh_md and mode in {"standalone", "mix"}:
         save_github_cache(gh_md, data_dir=data_dir)
     elif not gh_md and mode in {"standalone", "mix"}:
-        gh_md = load_github_cache(data_dir=data_dir)
-        if gh_md:
-            print("📋 Reusing latest successful GitHub section from server cache")
+        cached_gh = load_github_cache(data_dir=data_dir)
+        if cached_gh:
+            gh_md = filter_github_section(cached_gh, sent_links, history_file)
+            if gh_md:
+                print("📋 Reusing latest unpushed GitHub section from server cache")
 
     if gh_err:
         print(f"⚠️ [section_github] {gh_err}")
@@ -857,11 +896,12 @@ async def _run_unified_push(config: Dict):
             "seodescription": "",
             "lead": fallback.get("lead", ""),
             "highlights": fallback.get("highlights", []),
-            "profile": "default",
+            "profile": "morning" if is_morning_push(now, config) else "default",
         }
     else:
         metadata.setdefault("pushTime", now.isoformat())
-        metadata["profile"] = "default"
+        if not metadata.get("profile"):
+            metadata["profile"] = "morning" if is_morning_push(now, config) else "default"
 
     delivery_sections = limit_delivery_items(
         {
@@ -892,29 +932,58 @@ async def _run_unified_push(config: Dict):
     rss_count = delivery_sections.get("rss", "").count("###")
     delivered_count = sum(body.count("###") for body in delivery_sections.values())
     save_push_file(
-        push_file, final, rss_count, delivered_count, profile="default", metadata=metadata
+        push_file,
+        final,
+        rss_count,
+        delivered_count,
+        profile=metadata.get("profile", "default"),
+        metadata=metadata,
     )
     print(f"💾 Saved unified digest to {push_file}")
     
-    # Record sent history.
+    # Record sent history directly from delivered content.
     try:
-        min_score = config["filter"]["min_score"]
-        context_days = config["filter"]["context_days"]
-        data_dir = config.get("storage", {}).get("data_dir", "news-data")
-        to_push, _ = await collect_entries_for_push(
-            last_push_time=last_push_time,
-            context_days=context_days,
-            min_score=min_score,
-            data_dir=data_dir,
-            preferences=config.get("preferences"),
-            max_items=None,
-            config=config,
-        )
-        sent_links = links_present_in_content(to_push, final)
-        mark_links_as_sent(sent_links, data_dir=data_dir)
-        print(f"💾 Recorded {len(sent_links)} actually delivered morning-brief links")
+        delivered_urls = extract_urls_from_markdown(final)
+        if delivered_urls:
+            mark_links_as_sent(delivered_urls, data_dir=data_dir)
+            print(f"💾 Recorded {len(delivered_urls)} delivered links to sent-history.json")
+
+            today_str = now.strftime("%Y-%m-%d")
+            history_path = config.get("sections", {}).get("github_trending", {}).get(
+                "history_file", f"{data_dir}/trending-history.json"
+            )
+            trending_hist = load_trending_history(history_path)
+            gh_updated = False
+            for u in delivered_urls:
+                m = re.match(r"^https?://(?:www\.)?github\.com/([^/\s)\]\"'>]+/[^/\s)\]\"'>]+)", u)
+                if m:
+                    repo_url = f"https://github.com/{m.group(1).rstrip('/')}"
+                    trending_hist.touch(repo_url, today_str)
+                    gh_updated = True
+            if gh_updated:
+                trending_hist.save()
+                print("💾 Recorded delivered GitHub repositories to trending-history.json")
     except Exception as e:
         print(f"⚠️ Failed to record sent history: {e}")
+
+
+_run_morning_push = _run_unified_push
+_run_default_push = _run_unified_push
+
+
+def is_morning_push(now: datetime, config: Dict) -> bool:
+    """Return whether the current push is the morning brief."""
+    cron_list = config.get("schedule", {}).get("push_cron", [])
+    if not cron_list:
+        return False
+    if len(cron_list) == 1:
+        return True
+
+    from croniter import croniter
+    base = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_fires = [croniter(c, base).get_next(datetime) for c in cron_list]
+    closest = min(today_fires, key=lambda f: abs(now - f))
+    return closest == min(today_fires)
 
 
 

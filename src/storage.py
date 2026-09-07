@@ -5,6 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from src.config import get_timezone
 from src.markdown_utils import dump_frontmatter, parse_frontmatter
@@ -687,46 +688,191 @@ def assemble_with_sentinels(sections: Dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
-def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
-    """加载 sent-history.json 中 3 天内已发送的链接，并自动清理过期条目"""
-    path = Path(data_dir) / "sent-history.json"
-    if not path.exists() or path.stat().st_size == 0:
-        return set()
+_URL_RE = re.compile(r'https?://[^\s<>"\']+')
 
+
+def canonical_url(url: str) -> str:
+    """Normalize URL by stripping tracking parameters, fragments, trailing slashes, and lowercasing scheme/host."""
+    if not url or not isinstance(url, str):
+        return ""
+    clean = url.strip()
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            history = json.load(f)
-    except Exception as e:
-        print(f"⚠️ 读取 sent-history.json 失败: {e}")
-        return set()
+        parsed = urlparse(clean)
+        if not parsed.scheme or not parsed.netloc:
+            return clean
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+        # Filter common tracking query parameters
+        tracking_prefixes = ("utm_",)
+        tracking_keys = {"spm", "from", "ref", "oc", "fbclid", "gclid", "source"}
+        filtered_query = []
+        for k, v in parse_qsl(parsed.query, keep_blank_values=True):
+            k_lower = k.lower()
+            if any(k_lower.startswith(p) for p in tracking_prefixes) or k_lower in tracking_keys:
+                continue
+            filtered_query.append((k, v))
+        query = urlencode(filtered_query)
+        return urlunparse((scheme, netloc, path, parsed.params, query, ""))
+    except Exception:
+        return clean
 
-    # 清理过期条目
+
+def extract_urls_from_markdown(content: str) -> List[str]:
+    """Extract all HTTP/HTTPS URLs from Markdown content in order of appearance."""
+    if not content:
+        return []
+    urls: List[str] = []
+    seen = set()
+    for match in _URL_RE.finditer(content):
+        url = match.group(0)
+        while url and url[-1] in ".,;:!?)\"'>]`":
+            if url[-1] == ")" and url.count("(") >= url.count(")"):
+                break
+            if url[-1] == "]" and url.count("[") >= url.count("]"):
+                break
+            url = url[:-1]
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def is_link_sent(link: str, sent_links: set) -> bool:
+    """Check if link (raw or canonical) exists in sent_links set."""
+    if not link or not sent_links:
+        return False
+    clean = link.strip()
+    if clean in sent_links:
+        return True
+    canon = canonical_url(clean)
+    return bool(canon and canon in sent_links)
+
+
+def filter_github_section(
+    github_md: str,
+    sent_links: set,
+    history_path: str = "news-data/trending-history.json",
+) -> str:
+    """Filter out GitHub repositories that have already been sent.
+
+    If all items have already been delivered, returns empty string so the section can be omitted.
+    Remaining items are renumbered sequentially starting from 1.
+    """
+    if not github_md or not github_md.strip():
+        return ""
+
+    items = _delivery_items(github_md, max_items=999, start_number=1)
+    if not items:
+        # Fallback for non-itemized markdown or custom text
+        urls = extract_urls_from_markdown(github_md)
+        if urls and all(is_link_sent(u, sent_links) for u in urls):
+            return ""
+        return github_md
+
+    kept_items: List[str] = []
+
+    for item in items:
+        item_urls = extract_urls_from_markdown(item)
+        already_sent = any(is_link_sent(u, sent_links) for u in item_urls)
+
+        # Also inspect GitHub repository path
+        if not already_sent:
+            m = re.search(r"https?://(?:www\.)?github\.com/([^/\s)\]\"'>]+/[^/\s)\]\"'>]+)", item)
+            if m:
+                repo_url = f"https://github.com/{m.group(1).rstrip('/')}"
+                if is_link_sent(repo_url, sent_links):
+                    already_sent = True
+
+        if not already_sent:
+            kept_items.append(item)
+
+    if not kept_items:
+        return ""
+
+    # Renumber kept items
+    renumbered: List[str] = []
+    for idx, item in enumerate(kept_items, 1):
+        lines = item.splitlines()
+        first_line = lines[0]
+        new_first_line = re.sub(r"^###\s+\d+[.)、\s]*", f"### {idx}. ", first_line)
+        renumbered.append("\n".join([new_first_line] + lines[1:]))
+
+    return "\n\n".join(renumbered)
+
+
+def load_sent_links(days: int = 3, data_dir: str = "news-data") -> set:
+    """加载 sent-history.json 中指定天数内已发送的链接，同时扫描近期 push/notify 文件保证不漏"""
+    sent_links = set()
+    path = Path(data_dir) / "sent-history.json"
     cutoff = datetime.now() - timedelta(days=days)
-    valid_history = {}
-    for link, ts_str in history.items():
-        try:
-            # 兼容带/不带时区，统一转为 naive 比较
-            ts = datetime.fromisoformat(ts_str)
-            if ts.tzinfo is not None:
-                ts = ts.astimezone().replace(tzinfo=None)
-            if ts >= cutoff:
-                valid_history[link] = ts_str
-        except Exception:
-            continue
 
-    # 如果有清理，写回文件
-    if len(valid_history) != len(history):
+    if path.exists() and path.stat().st_size > 0:
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(valid_history, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            with open(path, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            valid_history = {}
+            for link, ts_str in history.items():
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                    if ts.tzinfo is not None:
+                        ts = ts.astimezone().replace(tzinfo=None)
+                    if ts >= cutoff:
+                        valid_history[link] = ts_str
+                        sent_links.add(link)
+                        canon = canonical_url(link)
+                        if canon:
+                            sent_links.add(canon)
+                except Exception:
+                    continue
 
-    return set(valid_history.keys())
+            if len(valid_history) != len(history):
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(valid_history, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"⚠️ 读取 sent-history.json 失败: {e}")
+
+    # 扫描近期 push-*.md 与 notify-*.md 文件，提取实际推送过的链接（双重保险）
+    cutoff_date = (datetime.now(get_timezone()).date() - timedelta(days=days))
+    data_path = Path(data_dir)
+    if data_path.exists():
+        for push_file in data_path.glob("push-*.md"):
+            try:
+                parts = push_file.name.replace("push-", "").split("-")
+                if len(parts) >= 3:
+                    file_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    if file_date >= cutoff_date:
+                        text = push_file.read_text(encoding="utf-8", errors="replace")
+                        for u in extract_urls_from_markdown(text):
+                            sent_links.add(u)
+                            canon = canonical_url(u)
+                            if canon:
+                                sent_links.add(canon)
+            except Exception:
+                continue
+
+        for notify_file in data_path.glob("notify-*.md"):
+            try:
+                date_str = notify_file.name.replace("notify-", "").replace(".md", "")
+                file_date = date.fromisoformat(date_str)
+                if file_date >= cutoff_date:
+                    text = notify_file.read_text(encoding="utf-8", errors="replace")
+                    for u in extract_urls_from_markdown(text):
+                        sent_links.add(u)
+                        canon = canonical_url(u)
+                        if canon:
+                            sent_links.add(canon)
+            except Exception:
+                continue
+
+    return sent_links
 
 
 def mark_links_as_sent(links: List[str], data_dir: str = "news-data"):
-    """标记链接为已发送，存入 sent-history.json"""
+    """标记链接为已发送，存入 sent-history.json（同时记录原始与规范化链接）"""
     if not links:
         return
     path = Path(data_dir) / "sent-history.json"
@@ -742,8 +888,15 @@ def mark_links_as_sent(links: List[str], data_dir: str = "news-data"):
 
     now_str = datetime.now().isoformat()
     for link in links:
-        if link:
-            history[link] = now_str
+        if not link or not isinstance(link, str):
+            continue
+        clean = link.strip()
+        if not clean:
+            continue
+        history[clean] = now_str
+        canon = canonical_url(clean)
+        if canon and canon != clean:
+            history[canon] = now_str
 
     try:
         with open(path, "w", encoding="utf-8") as f:

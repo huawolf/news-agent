@@ -54,6 +54,8 @@ class JobExecutor:
         app_logger.info("job=%s kind=%s source=%s started log=%s", job_id, kind, source, log_path)
         try:
             async with self._locks[kind]:
+                from dotenv import load_dotenv
+                load_dotenv(override=True)
                 config = self.config_service.load()
                 with log_path.open("a", encoding="utf-8", buffering=1) as stream:
                     stream.write(f"\n=== job {job_id} kind={kind} source={source} started {record['started_at']} ===\n")

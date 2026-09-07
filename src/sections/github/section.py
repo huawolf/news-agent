@@ -32,7 +32,15 @@ async def run_github_section(
                 github_md = res.get("github", "").strip()
                 if github_md:
                     print("🔌 Retrieved pre-compiled GitHub Trending from server")
-                    return github_md, None
+                    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+                    from src.storage import filter_github_section, load_sent_links
+                    sent_links = load_sent_links(days=3, data_dir=data_dir)
+                    history_path = cfg.get("history_file", f"{data_dir}/trending-history.json")
+                    filtered_md = filter_github_section(github_md, sent_links, history_path)
+                    if not filtered_md:
+                        print("ℹ️ Client Mode: all server GitHub Trending items already sent, omitting section")
+                        return "", None
+                    return filtered_md, None
                 else:
                     print("⚠️ Server pre-compiled GitHub Trending is empty")
             else:
@@ -114,4 +122,9 @@ async def run_github_section(
     if err:
         return "", err
     print(f"✅ GH: 板块输出 {len(md or '')} chars")
-    return md or "", None
+
+    data_dir = config.get("storage", {}).get("data_dir", "news-data")
+    from src.storage import filter_github_section, load_sent_links
+    sent_links = load_sent_links(days=3, data_dir=data_dir)
+    filtered_md = filter_github_section(md or "", sent_links, history_path)
+    return filtered_md or "", None

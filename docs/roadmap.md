@@ -152,3 +152,4 @@ news pool and GitHub; schedule configuration contains no source-section switch.
 | Logging Mechanism | Application Rolling File Logging | Unified log querying via Web/MCP without reliance on system-level log utilities like `journald`. |
 | Agent Interface Protocol | Python MCP stdio | Simplifies local IPC without opening extra network ports. |
 | Configuration Management | Centralized `ConfigService` | Prevents race conditions and corruption from concurrent Web, MCP, and job edits. |
+| Intra-Day Deduplication | Dual-Layer Link Normalization & Section Filtering | Prevents morning articles and GitHub repositories from being resent in afternoon pushes by extracting delivered URLs directly from Markdown and filtering sections against sent history. |

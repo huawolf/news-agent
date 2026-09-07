@@ -209,6 +209,8 @@ async def call_llm(
     """Call an OpenAI Chat, OpenAI Responses, or Anthropic Messages API."""
     api_key_name = config.get("apiKeyName", "OPENAI_API_KEY")
     resolved_api_key = api_key or os.environ.get(api_key_name)
+    if resolved_api_key:
+        resolved_api_key = resolved_api_key.strip("'\" \t\r\n")
     if not resolved_api_key:
         raise ValueError(f"未设置{api_key_name}环境变量")
 
@@ -456,9 +458,12 @@ def _reconcile_batch_results(
 
 
 async def _score_single_batch(
-    entries: List[Dict], config: Dict, batch_index: int = 0
+    entries: List[Dict],
+    config: Dict,
+    batch_index: int = 0,
+    semaphore: Optional[asyncio.Semaphore] = None,
 ) -> Tuple[List[Dict], List[str]]:
-    """对单批entries进行评分"""
+    """对单批entries进行评分，失败后等待指定时间重试"""
     # 从config获取批量评分提示词路径
     prompt_path = config.get("prompts", {}).get("score_batch", "prompts/score_batch.md")
     preferences = config.get("personal_preferences", "")
@@ -469,29 +474,60 @@ async def _score_single_batch(
         output_language_instruction=_output_language_instruction(config, json_mode=True),
     )
 
+    max_retries = int(config.get("batch_max_retries", 1))
+    retry_delay = int(config.get("batch_retry_delay_seconds", 300))
+    total_attempts = 1 + max(0, max_retries)
+    last_exception = None
 
-    try:
-        response = await call_llm(
-            prompt, config, response_format={"type": "json_object"}
-        )
-        results = _parse_score_response(response)
+    for attempt in range(total_attempts):
+        try:
+            if semaphore is not None:
+                async with semaphore:
+                    response = await call_llm(
+                        prompt, config, response_format={"type": "json_object"}
+                    )
+            else:
+                response = await call_llm(
+                    prompt, config, response_format={"type": "json_object"}
+                )
 
-        if not isinstance(results, list):
-            raise ValueError(f"LLM返回的不是数组: {type(results)}")
+            results = _parse_score_response(response)
 
-        return _reconcile_batch_results(entries, results, batch_index)
+            if not isinstance(results, list):
+                raise ValueError(f"LLM返回的不是数组: {type(results)}")
 
-    except Exception as e:
-        error_message = _llm_error_message(f"批次{batch_index + 1} 评分失败", e)
-        logger.exception(
-            "LLM scoring batch failed batch=%s entries=%s error_type=%s",
-            batch_index + 1,
-            len(entries),
-            e.__class__.__name__,
-        )
-        print(f"⚠️ {error_message}")
-        alert_errors = [error_message] if error_message.connection_failure else []
-        return [], alert_errors
+            matched_results, errors = _reconcile_batch_results(entries, results, batch_index)
+            if attempt > 0:
+                print(f"✅ 批次{batch_index + 1} 评分重试成功")
+                logger.info("批次%s 评分重试成功 (第%s次尝试)", batch_index + 1, attempt + 1)
+            return matched_results, errors
+
+        except Exception as e:
+            last_exception = e
+            if attempt < total_attempts - 1:
+                print(f"⚠️ 批次{batch_index + 1} 评分失败 ({e})，将在 {retry_delay} 秒后重试...")
+                logger.warning(
+                    "LLM scoring batch failed, retrying in %ss: batch=%s error=%s (attempt %s/%s)",
+                    retry_delay,
+                    batch_index + 1,
+                    e,
+                    attempt + 1,
+                    total_attempts,
+                )
+                if retry_delay > 0:
+                    await asyncio.sleep(retry_delay)
+
+    error_message = _llm_error_message(f"批次{batch_index + 1} 评分失败", last_exception)
+    logger.exception(
+        "LLM scoring batch failed after %s attempts batch=%s entries=%s error_type=%s",
+        total_attempts,
+        batch_index + 1,
+        len(entries),
+        last_exception.__class__.__name__ if last_exception else "Unknown",
+    )
+    print(f"⚠️ {error_message}")
+    alert_errors = [error_message] if error_message.connection_failure else []
+    return [], alert_errors
 
 
 async def score_batch(
@@ -510,6 +546,7 @@ async def score_batch(
     # 获取分批配置
     max_prompt_chars = config.get("max_prompt_chars", 10000)
     max_concurrent_batches = config.get("max_concurrent_batches", 3)
+    consecutive_threshold = int(config.get("batch_consecutive_failure_threshold", 3))
 
     # 分批
     batches = _split_entries_for_batch(entries, max_prompt_chars)
@@ -521,30 +558,49 @@ async def score_batch(
     # 如果只有一批，直接处理
     if len(batches) == 1:
         scores, errors = await _score_single_batch(batches[0], config, batch_index=0)
-        return _merge_scores(entries, scores), errors
+        alert_errors = errors if len(batches) >= consecutive_threshold else []
+        if errors and not alert_errors:
+            logger.warning(
+                "Scoring batch failure did not reach consecutive threshold (%s), skipping alert notification",
+                consecutive_threshold,
+            )
+        return _merge_scores(entries, scores), alert_errors
 
     # 多批并行处理（限制并发数）
     semaphore = asyncio.Semaphore(max_concurrent_batches)
 
-    async def score_with_limit(batch_index: int, batch: List[Dict]):
-        async with semaphore:
-            return await _score_single_batch(batch, config, batch_index=batch_index)
-
     # 并发处理所有批次
     batch_tasks = [
-        score_with_limit(batch_index, batch)
+        _score_single_batch(batch, config, batch_index=batch_index, semaphore=semaphore)
         for batch_index, batch in enumerate(batches)
     ]
     batch_results = await asyncio.gather(*batch_tasks)
 
-    # 合并所有评分结果
+    # 合并所有评分结果，并检查连续失败批次数
     all_scores = []
     all_errors = []
+    current_consecutive_failures = 0
+    has_alertable_streak = False
+
     for scores, errors in batch_results:
         all_scores.extend(scores)
-        all_errors.extend(errors)
+        if errors:
+            current_consecutive_failures += 1
+            all_errors.extend(errors)
+            if current_consecutive_failures >= consecutive_threshold:
+                has_alertable_streak = True
+        else:
+            current_consecutive_failures = 0
 
-    return _merge_scores(entries, all_scores), all_errors
+    alert_errors = all_errors if has_alertable_streak else []
+    if all_errors and not alert_errors:
+        logger.warning(
+            "Scoring batch failures (%s) did not reach consecutive threshold (%s), skipping alert notification",
+            len(all_errors),
+            consecutive_threshold,
+        )
+
+    return _merge_scores(entries, all_scores), alert_errors
 
 
 def _merge_scores(entries: List[Dict], scores: List[Dict]) -> List[Dict]:

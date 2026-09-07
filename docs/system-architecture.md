@@ -63,7 +63,7 @@ The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds 
 - **Job Executor:** Handles `fetch`, `push`, and `preview` execution with mutex locks, run states, and result persistence.
 - **Config Service:** Schema validation, atomic reads/writes, and notifying the Scheduler of changes.
 - **Logging & Audit Service:** Manages rolling log files and audits configuration modifications made by users or agents.
-- **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger Feishu error alerts.
+- **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger push error alerts. In the batch scoring stage, failed batches wait 5 minutes before retrying once (`batch_retry_delay_seconds: 300`, `batch_max_retries: 1`), and alerts are sent only when at least 3 consecutive batches fail (`batch_consecutive_failure_threshold: 3`).
 
 ### 2.1 Server-Client & Mix Mode Architecture
 
@@ -135,7 +135,10 @@ Top-level configuration schema with backward compatibility:
     "model": "deepseek-v4-flash",
     "baseUrl": "https://api.deepseek.com",
     "protocol": "openai_chat",
-    "apiKeyName": "DEEPSEEK_API_KEY"
+    "apiKeyName": "OPENAI_API_KEY",
+    "batch_retry_delay_seconds": 300,
+    "batch_max_retries": 1,
+    "batch_consecutive_failure_threshold": 3
   },
   "delivery": {
     "timezone": "Asia/Shanghai",
@@ -302,7 +305,12 @@ source order (`Read original 1`, `Read original 2`, or their Chinese
 equivalents); single-source headlines keep the unnumbered label. Sent-history
 tracking continues to mark each URL that appears in the delivered Markdown.
 
-Sent history records only candidate URLs that occur in the final delivered Markdown.
+Sent history records all candidate and repository URLs that occur in the final delivered Markdown.
+URLs are canonicalized by stripping tracking query parameters (`utm_*`, `spm`, `from`, `ref`, etc.), fragments, and trailing slashes.
+To guarantee that items sent in the morning are never resent in the afternoon (even across restarts or missing history files):
+- **Direct Markdown Extraction:** All delivered URLs are extracted directly from the delivered Markdown digest via `extract_urls_from_markdown`.
+- **Dual-Layer History Loading:** `load_sent_links` reads `sent-history.json` and actively scans recent `push-*.md` and `notify-*.md` files on disk.
+- **Intra-Day GitHub Filtering:** The GitHub section is filtered via `filter_github_section` against `sent_links`. If all repositories in today's digest have already been delivered earlier in the day, the GitHub section is cleanly omitted from subsequent pushes instead of repeating identical repositories.
 Model inputs omitted from immediate or scheduled output remain eligible for a later
 delivery for up to 24 hours; the previous push timestamp does not discard an unsent
 candidate. Filter logs report score, sent-history, cutoff, diversity,
@@ -317,6 +325,7 @@ Mix and standalone modes persist each non-empty generated GitHub section to
 file. On first startup after upgrading, the cache bootstraps by scanning recent
 push files for the latest non-empty GitHub sentinel section. The shared GitHub
 endpoint reads this persistent cache before using legacy push-file fallback.
+Subsequent daily pushes filter cached repositories against `sent_links` so already delivered projects are never resent.
 
 ---
 

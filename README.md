@@ -89,15 +89,15 @@ console private because it displays configured secret values.
 Secrets are stored in `.env`. Model settings, preferences, and delivery
 schedules are stored in `config.json` through the validated local API. The LLM
 key variable in `.env` must match `llm.apiKeyName`; the default configuration
-uses `DEEPSEEK_API_KEY`.
+uses `OPENAI_API_KEY`.
 
 ```dotenv
-DEEPSEEK_API_KEY=your_llm_api_key
+OPENAI_API_KEY=your_llm_api_key
 FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...
 # DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
-When using another key variable, such as `OPENAI_API_KEY` or
+When using another key variable, such as `DEEPSEEK_API_KEY` or
 `ANTHROPIC_API_KEY`, set `llm.apiKeyName` to the same name through the local API.
 After editing `.env` directly, restart the service from the project directory:
 
