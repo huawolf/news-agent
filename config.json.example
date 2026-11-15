@@ -1,132 +1,121 @@
 {
+    "mode": "slaver",
+    "server_url": "",
     "output_language": "en",
-    "filter": {
-        "min_score": 60,
-        "hot_threshold": 90,
-        "context_days": 2,
-        "keep_days": 30,
-        "push_context_days": 5,
-        "no_content_marker": "[NO_NEW_CONTENT]"
+    "content_languages": ["en"],
+    "personal_preferences": "Track cross-sector investment signals: AI infrastructure, frontier tech, crypto on-chain flows, commodities supply gaps and macro policy shifts. Prefer primary sources, quantitative evidence and material changes over commentary.",
+    "database": {
+        "url": "",
+        "schema": "news_agent",
+        "sqlite_path": "data/news_agent.db"
     },
-    "log": {
-        "retention_days": 30
+    "auth": {
+        "main_url": "http://127.0.0.1:5678",
+        "request_timeout": 10,
+        "membership_database_url": ""
     },
     "schedule": {
-        "fetch_interval_minutes": 60,
-        "fetch_lookback_minutes": 1440,
-        "push_cron": ["0 10 * * *", "0 20 * * *"],
-        "timezone_hours": 8
+        "fetch_interval_minutes": 60
     },
-    "personal_preferences": "Prioritize practical AI agent, LLM inference, and developer tooling news. Prefer primary sources and concise technical coverage.",
-    "delivery": {
-        "timezone": "Asia/Shanghai",
-        "schedules": [
-            {
-                "id": "morning",
-                "cron": "0 10 * * *",
-                "max_items": 10
-            },
-            {
-                "id": "evening",
-                "cron": "0 20 * * *",
-                "max_items": 10
-            }
-        ],
-        "immediate": {
-            "enabled": false,
-            "threshold": 90,
-            "daily_limit": 3
-        }
-    },
-    "sections": {
-        "github_trending": {
-            "enabled": true,
-            "max_items": 3,
-            "max_deep_dive": 10,
-            "readme_max_chars": 10000,
-            "history_file": "news-data/trending-history.json",
-            "request_timeout": 10,
-            "tokenName": "GITHUB_TOKEN"
-        },
-        "hackernews": {
-            "enabled": true,
-            "select_k": 3,
-            "top_comments": 50,
-            "top_l2_per_l1": 3,
-            "comment_max_chars": 2000,
-            "comments_total_chars": 80000,
-            "link_content_max_chars": 50000,
-            "request_timeout": 10,
-            "algolia_base": "https://hn.algolia.com/api/v1",
-            "jinaTokenName": "JINA_API_KEY"
-        },
-        "google_news": {
-            "enabled": true,
-            "regions": [
-                "cn",
-                "us"
-            ],
-            "topics": [
-                "business",
-                "technology",
-                "science"
-            ],
-            "max_items_per_feed": 20,
-            "max_lookback_hours": 24,
-            "request_timeout": 10
-        },
-        "signals": {
-            "enabled": true,
-            "request_timeout": 10,
-            "max_items_per_source": 5,
-            "rsshub_base": "https://rsshub.umzzz.com",
-            "sources": {
-                "github-trending": true,
-                "github-trending-js": true,
-                "github-trending-zh": true,
-                "36kr": true,
-                "sspai": true,
-                "oschina": true,
-                "v2ex": true,
-                "jike-ai-explore": true,
-                "jike-ai-discuss": true,
-                "jike-engineer": true,
-                "appstore-cn": true,
-                "appstore-tw": true,
-                "appstore-us": true,
-                "appstore-jp": true,
-                "appstore-kr": true,
-                "producthunt": true,
-                "reddit": true
-            }
-        },
-        "insights": {
-            "enabled": true
-        }
+    "filter": {
+        "min_score": 60,
+        "max_age_hours": 24
     },
     "fetch": {
         "max_workers": 10,
         "timeout": 10
     },
+    "tokenizer": {
+        "user_dict": "",
+        "extra_stopwords": []
+    },
+    "ranking": {
+        "title_weight": 3.0,
+        "k1": 1.5,
+        "b": 0.75,
+        "interest_match_bonus": 10.0,
+        "source_weight": 5.0,
+        "watchlist_bonus": 15.0,
+        "recency_bonus": 10.0,
+        "avoid_penalty": 20.0,
+        "interest_keywords": [],
+        "avoid_keywords": [],
+        "source_weights": {}
+    },
+    "dedup": {
+        "bm25_low_threshold": 40.0,
+        "bm25_high_threshold": 100.0,
+        "top_k": 10,
+        "window_hours": 72,
+        "same_source_bonus": 2.0,
+        "max_query_tokens": 10
+    },
+    "sync": {
+        "page_size": 200,
+        "max_lookback_hours": 24
+    },
+    "report": {
+        "batch_size": 200,
+        "content_max_bytes": 8192,
+        "path": "/api/mcp",
+        "daily_limit_per_user": 100,
+        "quota_timezone": "Asia/Shanghai",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 1.0
+    },
+    "mcp": {
+        "server_name": "news-agent-master",
+        "max_request_body_size": 4194304,
+        "allowed_hosts": [],
+        "allowed_origins": []
+    },
     "llm": {
-        "model": "deepseek-v4-flash",
-        "baseUrl": "https://api.deepseek.com",
+        "model": "openai/gpt-4o-mini",
+        "baseUrl": "https://openrouter.ai/api/v1",
         "protocol": "openai_chat",
-        "apiKeyName": "OPENAI_API_KEY",
+        "apiKeyName": "OPENROUTER_API_KEY",
         "request_timeout": 240,
-        "max_prompt_chars": 12000,
+        "max_prompt_chars": 300000,
         "max_concurrent_batches": 3,
         "batch_retry_delay_seconds": 300,
         "batch_max_retries": 1,
         "batch_consecutive_failure_threshold": 3,
         "prompts": {
+            "translate_signal": "prompts/translate_signal.md",
             "score_batch": "prompts/score_batch.md",
             "immediate_push": "prompts/immediate_push.md",
             "digest": "prompts/digest.md",
             "section_github": "prompts/section_github.md",
-            "section_hackernews_select": "prompts/section_hackernews_select.md",
-            "section_hackernews": "prompts/section_hackernews.md",
-            "insights": "prompts/insights.md"
+            "insights": "prompts/insights.md",
+            "watchlist_asset": "prompts/watchlist_asset.md"
+        }
+    },
+    "translation": {
+        "enabled": true,
+        "concurrency": 4,
+        "max_retry": 3,
+        "batch_size": 10,
+        "interval_minutes": 10
+    },
+    "delivery": {
+        "timezone": "Asia/Shanghai",
+        "schedules": [
+            {
+                "id": "push-1",
+                "cron": "0 9 * * mon,tue,wed,thu,fri,sat,sun"
+            },
+            {
+                "id": "push-2",
+                "cron": "0 17 * * mon,tue,wed,thu,fri,sat,sun"
+            }
+        ],
+        "push_limits": {
+            "hot": 10,
+            "watchlist": 10,
+            "github": 3,
+            "github_window_days": 30,
+            "min_score": 80,
+            "max_per_topic": 3
         }
     },
     "push": {
@@ -138,59 +127,18 @@
             "enabled": true,
             "apiKeyName": "FEISHU_WEBHOOK_URL"
         },
+        "telegram": {
+            "enabled": false,
+            "apiKeyName": "TELEGRAM_BOT_TOKEN",
+            "chatId": ""
+        },
         "custom": {
             "enabled": false,
             "apiKeyName": "CUSTOM_PUSH_URL",
             "tokenKeyName": "CUSTOM_PUSH_TOKEN"
         }
     },
-    "mode_settings": {
-        "mode": "client",
-        "server_url": "http://13.158.182.33:12301",
-        "server_api_token_name": "processednews"
-    },
-    "sources": {
-        "base_opml": "resources/rss.opml",
-        "add": [
-            {
-                "title": "OpenAI News",
-                "xmlUrl": "https://openai.com/news/rss.xml",
-                "category": "ai"
-            },
-            {
-                "title": "Chrome for Developers",
-                "xmlUrl": "https://developer.chrome.com/static/blog/feed.xml",
-                "category": "developer_open_source"
-            },
-            {
-                "title": "Cloudflare Developers",
-                "xmlUrl": "https://developers.cloudflare.com/changelog/rss/index.xml",
-                "category": "developer_open_source"
-            },
-            {
-                "title": "Infoq",
-                "xmlUrl": "https://feed.infoq.com/",
-                "category": "other"
-            }
-        ],
-        "block": [
-            {
-                "title": "Google Developers Blog",
-                "xmlUrl": "https://developers.googleblog.com/feeds/posts/default"
-            },
-            {
-                "title": "Microsoft for Developers",
-                "xmlUrl": "https://devblogs.microsoft.com/landing"
-            },
-            {
-                "title": "ElevenLabs Blog",
-                "xmlUrl": "https://api.bestblogs.dev/feed/elevenLabsBlog"
-            },
-            {
-                "title": "Infoq(en)",
-                "xmlUrl": "http://www.infoq.com/rss/rss.action"
-            }
-        ],
-        "block_domains": ["*.substack.com", "*.youtube.com"]
+    "log": {
+        "retention_days": 30
     }
 }

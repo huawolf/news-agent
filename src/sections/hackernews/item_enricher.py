@@ -10,12 +10,12 @@ enrich 策略:取 L1 + 每个 L1 下前 N 条 L2 回复,合并为 tree JSON:
 
 外链正文优先走 Jina Reader (https://r.jina.ai/<url>, 返回 markdown),
 失败回退到直接 GET + html_to_markdown。Jina API key 可选(配置后免费额度更高),
-环境变量名通过 `sections.hackernews.jinaTokenName` 配置(默认 JINA_API_KEY)。
+环境变量名通过 Hacker News 适配器行的 `params.token_name` 配置(默认 JINA_API_KEY)。
 """
 
 import asyncio
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import aiohttp
 
@@ -231,7 +231,7 @@ async def enrich_stories(
             return_exceptions=True,
         )
     enriched: List[Dict] = []
-    for r, src in zip(results, stories):
+    for r, src in zip(results, stories, strict=True):
         if isinstance(r, Exception):
             errors.append(f"enrich story {src['id']} 失败: {r}")
         else:

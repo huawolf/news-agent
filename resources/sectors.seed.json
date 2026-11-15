@@ -1,0 +1,75 @@
+{
+  "version": 4,
+  "sectors": [
+    {
+      "name": "前沿科技",
+      "keywords": [
+        "quantum computing",
+        "quantum technology",
+        "ai drug discovery",
+        "ai biology",
+        "synthetic biology",
+        "space technology",
+        "commercial space",
+        "embodied intelligence",
+        "humanoid robot",
+        "artificial intelligence",
+        "foundation model",
+        "ai agent",
+        "nuclear fusion",
+        "fusion energy"
+      ],
+      "sort_weight": 100,
+      "sort_order": 1
+    },
+    {
+      "name": "股票",
+      "keywords": [
+        "earnings",
+        "guidance",
+        "buyback",
+        "ipo",
+        "valuation",
+        "short interest"
+      ],
+      "sort_weight": 95,
+      "sort_order": 2
+    },
+    {
+      "name": "加密货币",
+      "keywords": [
+        "bitcoin",
+        "ethereum",
+        "stablecoin",
+        "defi",
+        "crypto regulation"
+      ],
+      "sort_weight": 90,
+      "sort_order": 3
+    },
+    {
+      "name": "大宗商品",
+      "keywords": [
+        "crude oil",
+        "gold",
+        "natural gas",
+        "rare earth",
+        "commodity futures"
+      ],
+      "sort_weight": 85,
+      "sort_order": 4
+    },
+    {
+      "name": "宏观经济",
+      "keywords": [
+        "federal reserve",
+        "inflation",
+        "interest rate",
+        "jobs report",
+        "tariff"
+      ],
+      "sort_weight": 80,
+      "sort_order": 5
+    }
+  ]
+}

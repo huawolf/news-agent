@@ -1,33 +1,40 @@
 # News Agent
 
-News Agent is a local, personal news service. It collects RSS feeds, Hacker News, and built-in signal sources into one scored news pool, adds a GitHub Trending digest, and uses an OpenAI-compatible LLM to rank, summarize, and deliver to Feishu or Discord.
+News Agent is an open-source investment-signal aggregator. It collects RSS feeds and built-in sources, deduplicates items with URL rules and application-level BM25, scores them with an LLM, and delivers personalized digests to Feishu, Discord, Telegram, or a custom endpoint.
 
-It runs on macOS, Windows, and Linux. A local web console, HTTP API, and stdio MCP server all manage the same configuration and jobs.
+The product is an **investment researcher**, not a news editor: every signal is expected to carry a sector, related assets, a direction, and a material change worth acting on. See [System Architecture](docs/system-architecture.md) for the implementation contract and its linked architecture documents.
 
-![News Agent overview](resources/description.jpg)
+## Runtime modes
+
+There are exactly two modes:
+
+| Mode | Purpose | Database |
+|---|---|---|
+| `slaver` | Runs locally, collects private sources, and delivers local digests. It can also pull the shared pool from a master and report local-only signals. | SQLite by default |
+| `master` | Collects shared sources, serves the public portal and backoffice, and accepts slaver reports over MCP. | PostgreSQL |
+
+Whether a slaver connects to a master is a configuration detail, not a third mode: an empty `server_url` means a fully independent local instance.
 
 ## Features
 
-- Aggregate RSS feeds, Hacker News, Product Hunt, Reddit, App Store new apps, V2EX, 36Kr, Sspai, OSChina, Jike topics, and other built-in sources into one news pool, with GitHub Trending generated alongside it.
-- Rank, filter, deduplicate, and summarize content with an LLM.
-- Add, update, verify, and remove RSS sources from the web console, API, or MCP.
-- Set interests, exclusions, source weights, delivery times, and item limits.
-- Run scheduled fetches and deliveries, or trigger them manually.
-- Deliver to Feishu, Discord, or a custom HTTP endpoint.
-- Keep configuration, logs, and job history in the local user-data directory.
-- Bind the local control plane to `127.0.0.1:12301` by default.
+- Collect RSS, Feed pages, Hacker News, Google News, GitHub Trending, and community sources.
+- Deduplicate by normalized URL and application-level BM25 before scoring, then re-check before persistence.
+- Score investment relevance, assign sectors, extract related assets, and classify direction.
+- Translate display fields for bilingual portals while keeping `assets` and `sectors` stable.
+- Sync the shared signal pool between master and connected slavers; report through Streamable HTTP MCP.
+- Show reporter aliases and reputation (overall and last-10 high-score rates) with complete public history; keep `score < 60` rows hidden and cap each reporter at 100 LLM-scored items per day.
+- Browse the public portal, manage sources and preferences, and operate a loopback-only local console.
 
 ## Requirements
 
 - macOS, Windows, or Linux
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- An API key for an OpenAI Chat, OpenAI Responses, or Anthropic Messages endpoint
+- An API key for a supported OpenAI-compatible or Anthropic-compatible LLM endpoint
 
-The installer scripts for macOS, Linux, and Windows will automatically install `uv` for the current user if it is not already available.
+News Agent is not yet published as a self-contained PyPI package: `resources/`, `prompts/`, and `alembic/` live beside the source tree. Run it from a checkout or use the installer.
 
 ## Install
-
-You can install News Agent using a single terminal command without cloning first:
 
 macOS or Linux:
 
@@ -41,187 +48,117 @@ Windows PowerShell:
 iwr -useb https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/install.ps1 | iex
 ```
 
-The installer creates `.env` from `.env.example`, installs the locked runtime dependencies, registers a per-user login service, and restarts that service so repeated installs immediately run the updated code. Open <http://127.0.0.1:12301> after installation.
+From a clone, run `./scripts/install.sh` or `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1`. The installer creates missing `config.json` and `.env` files from the examples, installs locked dependencies, registers a per-user service, and waits for the default local slaver health check at <http://127.0.0.1:12301/api/status>.
+
+Review both files before the first fetch. The default configuration is an independent slaver with SQLite and does not require manai-pic, a master, or PostgreSQL. It still needs network access to its enabled sources and an LLM endpoint for scoring; delivery credentials are needed only for enabled push targets, and BrowserWorker is needed only for Feed-page collection.
 
 ## Configure
 
-### Default Client Mode
+Use `config.json` for runtime behavior. Keep secrets in `.env`; the variable named by `llm.apiKeyName` must match the key stored there.
 
-Regular users run in `client` mode by default. The shared server fetches and
-scores the common source catalog once; each client pulls the last 24 hours of
-processed entries scoring at least 60 plus the latest successful GitHub digest, adds and scores only
-its private custom RSS feeds, then uses its own preferences, schedule, language,
-item limit, LLM, and delivery channel to select, summarize, and send the digest.
+| Section | Purpose |
+|---|---|
+| `mode`, `server_url` | Select `master` or `slaver`; an empty `server_url` keeps a slaver local-only. |
+| `database`, `auth` | Database DSN/schema and optional manai-pic identity lookup. `auth` is unused by a standalone slaver. |
+| `schedule`, `fetch`, `filter` | Fetch cadence, concurrency/timeouts, and storage-age/score floors. |
+| `dedup`, `ranking`, `tokenizer` | URL/BM25 deduplication, final-score weighting, and text tokenization. |
+| `output_language`, `content_languages`, `translation` | Primary output language, additional portal languages, and the master-only translation worker. |
+| `llm` | Scoring endpoint, model, protocol, prompts, retries, and batch limits. |
+| `delivery`, `push` | Cron push schedules, section limits, and Feishu/Discord/Telegram/custom targets. |
+| `sync`, `report`, `mcp` | Shared-pool pull window, MCP reporting limits/quotas, and server transport settings. |
+| `log` | Log retention. |
 
-The default connection is:
+Start from [config.json.example](config.json.example) and [.env.example](.env.example); the example config is complete and the environment file lists every supported secret. Never commit the active files.
 
-```json
-"mode_settings": {
-  "mode": "client",
-  "server_url": "http://13.158.182.33:12301",
-  "server_api_token_name": "processednews"
-}
-```
+### Environment variables
 
-`processednews` is the shared-news API value and does not protect the local
-configuration page. `NEWS_AGENT_LOCAL_TOKEN` is a separate, optional private
-password used only by the local Web/configuration API. Never replace one with
-the other.
+| Variable | Purpose |
+|---|---|
+| `NEWS_AGENT_CONFIG` | Override the configuration file path. |
+| `NEWS_AGENT_DATA_DIR` | Store the SQLite database and logs outside the project tree. |
+| `NEWS_AGENT_DATABASE_URL` | Override `database.url`, including for Alembic. |
+| `NEWS_AGENT_MEMBERSHIP_DATABASE_URL` | Optional manai-pic membership lookup DSN. |
+| `NEWS_AGENT_ADMINS` | Phone numbers or emails allowed to administer a master; comma-separated or JSON array. |
+| `RSSHUB_BASE` | Override the RSSHub base URL for RSSHub-backed sources. |
+| `BrowserWorker_PORT` / `BrowserWorker_LOCK_FILE` | Point Feed-page collection at an existing BrowserWorker daemon. |
 
-The local page reads `/api/news-sources` under the optional local-control rule.
-Remote clients read `/api/server/sources` with `processednews`; these are
-separate endpoints so an unset `NEWS_AGENT_LOCAL_TOKEN` never causes the local
-page to request shared-news authentication.
+Model keys, Feishu/Discord webhook URLs, bot tokens, `GITHUB_TOKEN`, `JINA_API_KEY`, and `REPORTER_KEY` are documented in [.env.example](.env.example). Never commit the active `.env`.
 
-Operators running the shared service use `mix` mode. Mix mode performs the
-server fetch/scoring work, retains a rolling 24-hour in-memory cache, exposes
-the shared-news endpoints, and can also run its own delivery workflow. Manual
-and scheduled runs both process the full enabled source set and GitHub; delivery
-schedules control only time and final news count.
-Configurations without `mode_settings` receive the same regular-user `client`
-defaults. Set `standalone` or `mix` explicitly only for self-hosted operation.
+### Master identity
 
-Configure the model, endpoint, protocol, API key, and delivery webhooks in the
-**Model and delivery settings** section of the local web console. The fields
-save automatically and the model connection can be tested in place. Keep the
-console private because it displays configured secret values.
-
-Secrets are stored in `.env`. Model settings, preferences, and delivery
-schedules are stored in `config.json` through the validated local API. The LLM
-key variable in `.env` must match `llm.apiKeyName`; the default configuration
-uses `OPENAI_API_KEY`.
-
-```dotenv
-OPENAI_API_KEY=your_llm_api_key
-FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...
-# DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-```
-
-When using another key variable, such as `DEEPSEEK_API_KEY` or
-`ANTHROPIC_API_KEY`, set `llm.apiKeyName` to the same name through the local API.
-After editing `.env` directly, restart the service from the project directory:
-
-```bash
-uv run news-agent service restart
-```
-
-The first service start creates `config.json` from
-[config.json.example](config.json.example). Use the web console or local API to
-manage model settings, feeds, preferences, and schedules instead of replacing
-the active configuration file.
-
-Optional source integrations can also use `.env` credentials. Product Hunt,
-for example, uses `PH_TOKEN` when configured and falls back to its public feed
-when the token is absent.
-
-Important settings:
-
-- `preferences`: interests, exclusions, source weights, language preference, and diversity limits.
-- `llm`: model, endpoint, API-key environment variable, and protocol. The Web
-  console detects OpenAI Chat Completions, OpenAI Responses, or Anthropic
-  Messages from the endpoint and model name, allows manual override, and can
-  save and test the current connection.
-- `sections.signals`: built-in signal adapters for Product Hunt, Reddit fallback, GitHub variants, V2EX, RSSHub topics, App Store regions, and domestic RSS sources.
-- `schedule.fetch_lookback_minutes`: fetch lookback window; defaults to 1440 minutes so built-in signals only keep the last 24 hours, except daily ranking pages such as GitHub Trending.
-- `log.retention_days`: number of daily log directories to retain; defaults to 30 days.
-- `delivery.schedules`: cron schedules and the unified news `max_items` limit per delivery. Every run processes the full news source pool and GitHub; sources are not selected per schedule.
-  Without an explicit schedule, deliveries default to 10:00 and 20:00 daily,
-  with at most 10 news items each time.
-- `delivery.immediate`: high-score alert threshold and daily limit.
-- `mode_settings`: selects `standalone`, `mix`, or `client`. Client deployments
-  read pre-scored entries with `score >= 60` from `server_url`; mix deployments also expose the
-  rolling shared-news API. `server_api_token_name` carries the shared API value
-  `processednews`; it is unrelated to `NEWS_AGENT_LOCAL_TOKEN`.
-- `push`: enable Feishu, Discord, or a custom endpoint.
+A master verifies manai-pic JWTs for sync, MCP reporting, and administration. Set `auth.main_url` to the identity service and `NEWS_AGENT_ADMINS` to the administrator allowlist. A connected slaver also needs a verified identity; a local-only slaver does not.
 
 ## Run
 
-Use `uv run news-agent` for all commands:
+```bash
+uv sync --locked
+uv run news-agent check
+uv run news-agent fetch
+uv run news-agent push
+uv run news-agent serve
+```
+
+`check` validates the mode, locale, and database settings, then prints the mode, the database URL with its password redacted, and the schema. It does not open a database connection or call the LLM.
+
+`serve` starts the scheduler and the local web/API service on `127.0.0.1:12301` by default. Interactive API documentation is available at <http://127.0.0.1:12301/docs>.
+
+Manage the per-user service with:
 
 ```bash
-uv sync                         # Install development dependencies
-uv run news-agent check         # Check LLM connectivity
-uv run news-agent fetch         # Fetch and score once
-uv run news-agent push          # Generate and send one digest
-uv run news-agent serve         # Run the local web/API service
-uv run news-agent mcp           # Run the stdio MCP server
 uv run news-agent service status
+uv run news-agent service restart
 ```
 
-The `serve` command starts the built-in scheduler and the local API at <http://127.0.0.1:12301>. Interactive API documentation is available at <http://127.0.0.1:12301/docs>.
+Uninstall the service without removing its data with `scripts/uninstall.sh` or `scripts/uninstall.ps1`.
 
-A shared mix server must listen on an interface reachable by its clients, for
-example:
+### Browser dependency
+
+Only Feed-page collection needs an external BrowserWorker daemon (default port `12321`). RSS, RSSHub-backed signals, Hacker News, Google News, and GitHub Trending do not use a browser. If BrowserWorker is unavailable, the Feed section logs a failure and the rest of the fetch cycle continues.
+
+## Deployment
+
+The local service binds to loopback. A master must run behind a reverse proxy; [deploy/Caddyfile.example](deploy/Caddyfile.example) is one example that mounts the app under `/news` on `vaneworker.com`. It is not a required deployment shape. Keep FastAPI's `/docs`, `/redoc`, and `/openapi.json` restricted on a public master.
+
+## Development
 
 ```bash
-uv run news-agent serve --host 0.0.0.0 --port 12301
+uv sync --locked
+uv run ruff check src tests alembic
+uv run pytest
+uv build
 ```
 
-Before exposing a mix server, set a private `NEWS_AGENT_LOCAL_TOKEN` for its
-management API. Clients still use `processednews` only for shared-news reads.
+Tests use temporary SQLite databases and do not require live LLM, delivery, or manai-pic credentials.
 
-To remove the login service without deleting data:
+Contribution guidelines:
 
-```bash
-./scripts/uninstall.sh
-```
+- Keep changes focused and preserve the master/slaver contract.
+- Add regression tests for behavior changes and prefer one behavior per test.
+- Update the relevant documentation when a config key, API contract, data model, or runtime behavior changes.
+- Never commit `.env`, `config.json`, database files, logs, or credentials.
+- Write code comments, public documentation, and prompts in English.
 
-On Windows:
+## Project layout
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
-```
+| Path | Contents |
+|---|---|
+| `src/` | Runtime package: API, adapters, pipeline, database, deduplication, delivery, and CLI. |
+| `alembic/` | Versioned database migrations. Runs automatically before seed import at startup. |
+| `resources/` | Default RSS/sector/adapter/feed seeds and portal assets. |
+| `prompts/` | Scoring, translation, digest, and asset-recognition prompts. |
+| `tests/pytest/` | Regression suite using temporary SQLite databases. |
+| `scripts/` | macOS/Linux and Windows install/uninstall helpers. |
+| `docs/` | Architecture, data model, pipelines, APIs, UI, integrations, and status documents. |
 
-## Local API and MCP
+## Documentation
 
-The local API supports configuration, source, delivery, job, and log operations.
-Set `NEWS_AGENT_LOCAL_TOKEN` in `.env` to protect these local management
-requests. It is not the shared server value `processednews` and is never used
-for client-to-server news retrieval.
-
-The MCP server is intended for a local agent process:
-
-```json
-{
-  "command": "uv",
-  "args": ["run", "news-agent", "mcp"],
-  "cwd": "/path/to/news-agent"
-}
-```
-
-Available MCP tools include source management, preference and schedule updates, manual fetch/push jobs, digest previews, job status, and recent logs. `run_push` requires explicit confirmation.
-
-AI agents performing installation or initial configuration should follow the
-[News Agent Operator skill](SKILL.md). It defines the
-non-browser workflow for secret handling, API configuration, service restart,
-health checks, model testing, previews, and confirmed delivery.
-
-## Data and Logs
-
-Runtime data is stored in the project directory by default:
-
-| Type | Directory |
-| --- | --- |
-| News data | `news-data/` |
-| Logs | `logs/` |
-| Job records | `runs/` |
-
-Use `NEWS_AGENT_DATA_DIR` or `NEWS_AGENT_CONFIG` to override these paths. Application logs use rotating files; the project does not depend on system journals.
-Mix and standalone servers keep the latest successful GitHub section at
-`news-data/github-latest.md`; shared clients read it through
-`/api/server/github-trending`.
-
-## Security
-
-News Agent binds to loopback by default. Regular clients should keep that
-default. A mix server may expose port `12301` for shared-news clients; protect
-its local management routes with `NEWS_AGENT_LOCAL_TOKEN` and restrict network
-access where practical. The public `processednews` value is not a management
-password. Keep `.env`, webhook URLs, and API keys out of version control.
-
-## Contributing
-
-Issues and pull requests are welcome. Please keep changes focused, add tests for behavior changes, and update the relevant documentation when configuration or user-facing behavior changes.
+- [System architecture](docs/system-architecture.md)
+- [Data model and seeds](docs/data-model-and-seeds.md)
+- [Processing and sync](docs/processing-and-sync.md)
+- [MCP and HTTP APIs](docs/mcp-and-http-api.md)
+- [Web UI](docs/web-ui.md)
+- [Integrations and status](docs/integrations-and-status.md)
+- [Operator skill](SKILL.md)
 
 ## License
 

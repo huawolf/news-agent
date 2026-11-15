@@ -1,21 +1,55 @@
 [project]
 name = "news-agent"
-version = "0.2.0"
+version = "0.3.0"
+description = "AI-assisted investment signal aggregation, deduplication, ranking, and delivery."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "News Agent contributors" }]
 requires-python = ">=3.12"
+keywords = [
+    "investment-signals",
+    "news-aggregation",
+    "rss",
+    "bm25",
+    "fastapi",
+    "mcp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "aiohttp>=3.9,<4",
+    "alembic>=1.14,<2",
     "apscheduler>=3.10,<4",
     "beautifulsoup4>=4.12,<5",
-    "croniter>=6,<7",
     "fastapi>=0.115,<1",
     "feedparser>=6,<7",
+    "httpx>=0.27,<1",
+    "jieba>=0.42,<1",
     "markdownify>=0.11,<2",
     "mcp>=1.29,<2",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.9,<3",
     "python-dotenv>=1,<2",
     "pyyaml>=6,<7",
     "requests>=2.34,<3",
+    "segno>=1.6.6",
+    "sqlalchemy>=2.0,<3",
     "uvicorn>=0.30,<1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/huawolf/news-agent"
+Repository = "https://github.com/huawolf/news-agent"
+Issues = "https://github.com/huawolf/news-agent/issues"
+Documentation = "https://github.com/huawolf/news-agent/tree/main/docs"
 
 [project.scripts]
 news-agent = "src.main:main"
@@ -24,11 +58,40 @@ news-agent = "src.main:main"
 dev = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.24,<1",
+    "ruff>=0.14,<1",
 ]
 
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.api" = [
+    "static/*.css",
+    "static/*.svg",
+    "static/*.js",
+    "static/*.json",
+    "static/locales/**/*.json",
+    "static/scripts/*.cjs",
+    "static/vendor/*.js",
+    "static/vendor/*.LICENSE",
+    "static/vendor/*.md",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests/pytest"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+# FastAPI dependency injection intentionally calls Depends() in argument defaults.
+ignore = ["B008"]

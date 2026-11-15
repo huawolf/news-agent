@@ -17,8 +17,14 @@ from src.llm_protocol import (
     resolve_llm_endpoint,
 )
 from src.markdown_utils import normalize_str_list, parse_frontmatter
+from src.dedup.tokenizer import build_keywords, normalize_keywords
+from src.regions import REGION_SENSITIVE_SECTORS, normalize_signal_region
 
 logger = logging.getLogger("news_agent.llm")
+
+
+def _json_default(value):
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 class LLMOperationError(str):
@@ -61,6 +67,8 @@ def _llm_error_message(prefix: str, error: BaseException) -> LLMOperationError:
 def load_prompt(prompt_path: str, **kwargs) -> str:
     """加载提示词模板并填充变量"""
     path = Path(prompt_path)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent.parent / path
     if not path.exists():
         raise FileNotFoundError(f"提示词文件不存在: {prompt_path}")
 
@@ -93,19 +101,23 @@ def _output_language_instruction(config: Dict, *, json_mode: bool = False) -> st
         if json_mode:
             return (
                 "Output language: Simplified Chinese. Keep JSON keys exactly as specified. "
-                "Write all natural-language values such as summary, tags, and keywords in Simplified Chinese, "
-                "except product names, company names, model names, repository names, and URLs."
+                "Write all natural-language values such as title, summary and keywords in "
+                "Simplified Chinese, keeping those three fields in the same language. "
+                "Keep product names, company names, model names, repository names, asset names, and URLs unchanged. "
+                "Asset names are always English regardless of the output language."
             )
         return (
             "Output language: Simplified Chinese. All user-visible content, including YAML frontmatter values, "
             "Markdown headings, summaries, highlights, labels, and analysis, must be written in Simplified Chinese. "
-            "Keep product names, company names, model names, repository names, URLs, and code identifiers unchanged."
+            "Keep product names, company names, model names, repository names, asset names, URLs, and code "
+            "identifiers unchanged. Asset names are always English regardless of the output language."
         )
     if json_mode:
         return (
             "Output language: English. Keep JSON keys exactly as specified. "
-            "Write all natural-language values such as summary, tags, and keywords in English, "
-            "except product names, company names, model names, repository names, and URLs."
+            "Write all natural-language values such as title, summary and keywords in English, "
+            "keeping those three fields in the same language. "
+            "Keep product names, company names, model names, repository names, and URLs unchanged."
         )
     return (
         "Output language: English. All user-visible content, including YAML frontmatter values, "
@@ -258,27 +270,58 @@ async def check_llm_available(
     return response_text
 
 
+def _sectors_prompt_block(sectors: Optional[List[Dict]]) -> str:
+    """Render enabled sectors and their keywords for the scoring prompt.
+
+    Sectors always come from the caller (the ``sector`` table filtered by
+    ``enabled``). The seed file is only an import source, never a runtime
+    fallback, so disabling a sector in the database takes effect immediately.
+    """
+    if not sectors:
+        return "（本实例未配置板块，sectors 一律输出空数组）"
+
+    lines = []
+    for sector in sectors:
+        keywords = sector.get("keywords") or []
+        scope = (
+            "地区敏感：必须输出 region"
+            if sector["name"] in REGION_SENSITIVE_SECTORS
+            else "地区无关：region 必须输出 null"
+        )
+        lines.append(f"- {sector['name']}：{'、'.join(keywords)}；{scope}")
+    return "\n".join(lines)
+
+
+def _entry_prompt_view(entry: Dict) -> Dict:
+    """Project one entry into the exact shape rendered into the batch prompt."""
+    return {
+        "link": entry.get("link", ""),
+        "title": entry.get("title", "无标题"),
+        "source": entry.get("source", "未知来源"),
+        "published": entry.get("published", ""),
+        "content": entry.get("content", "")[:1000],
+    }
+
+
 def _build_batch_prompt(
     entries: List[Dict],
     prompt_path: str = None,
     preferences: str = "",
     output_language_instruction: str = "",
+    sectors: Optional[List[Dict]] = None,
+    duplicate_titles: Optional[List[Dict]] = None,
+    short_references: bool = False,
 ) -> str:
     """构建批量评分prompt"""
     # 构建entries JSON列表（只包含必要字段）
-    entries_for_llm = []
-    for e in entries:
-        entries_for_llm.append(
-            {
-                "link": e.get("link", ""),
-                "title": e.get("title", "无标题"),
-                "source": e.get("source", "未知来源"),
-                "published": e.get("published", ""),
-                "content": e.get("content", "")[:1000],  # 限制内容长度至1000字
-            }
-        )
+    prompt_entries = (
+        _scoring_reference_entries(entries) if short_references else entries
+    )
+    entries_for_llm = [_entry_prompt_view(e) for e in prompt_entries]
 
-    entries_json = json.dumps(entries_for_llm, ensure_ascii=False, indent=2)
+    entries_json = json.dumps(
+        entries_for_llm, ensure_ascii=False, indent=2, default=_json_default
+    )
 
     # 从文件加载提示词模板，如果未指定则使用默认路径
     if prompt_path is None:
@@ -289,42 +332,14 @@ def _build_batch_prompt(
         entries_json=entries_json,
         preferences=preferences,
         output_language_instruction=output_language_instruction,
+        sectors=_sectors_prompt_block(sectors),
+        recent_titles_json=json.dumps(
+            duplicate_titles or [],
+            ensure_ascii=False,
+            indent=2,
+            default=_json_default,
+        ),
     )
-
-
-def _parse_llm_json_response(response: str) -> List[Dict]:
-    """解析LLM返回的JSON响应"""
-    text = response.strip()
-
-    # 尝试去除markdown代码块
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-
-    if text.endswith("```"):
-        text = text[:-3]
-
-    text = text.strip()
-
-    # 尝试查找JSON数组
-    if text.startswith("[") and text.endswith("]"):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            print("⚠️ 直接解析JSON失败，尝试从文本中提取JSON数组")
-            pass
-
-    # 尝试从文本中提取JSON数组
-    match = re.search(r"\[.*\]", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            print("⚠️ 从文本中提取JSON数组失败:", text)
-            pass
-
-    raise ValueError(f"无法从响应中解析JSON: {response[:200]}...")
 
 
 def _parse_score_response(response: str) -> List[Dict]:
@@ -375,37 +390,82 @@ def _parse_score_response(response: str) -> List[Dict]:
     raise ValueError(f"无法从响应中提取评分数组: {response[:200]}...")
 
 
+def _entry_json_cost(entry: Dict) -> int:
+    """Return the exact characters one entry adds to the rendered entries JSON.
+
+    The prompt renders the entries array with ``indent=2``. For ``n`` entries
+    the rendered array is::
+
+        L = sum(len(element_i)) + 2 * n + 2
+
+    where each element is indented by two spaces and the elements are joined
+    by ``",\n"``. Measuring with the real renderer keeps the batch budget in
+    sync with the prompt that is actually sent.
+    """
+    rendered = json.dumps(
+        _entry_prompt_view(entry),
+        ensure_ascii=False,
+        indent=2,
+        default=_json_default,
+    )
+    element = "\n".join("  " + line for line in rendered.split("\n"))
+    return len(element) + 2
+
+
+def _scoring_reference_entries(entries: List[Dict]) -> List[Dict]:
+    """Give each scoring row a short, batch-local correlation key."""
+    references = []
+    for index, entry in enumerate(entries, start=1):
+        references.append({**entry, "link": f"item-{index}"})
+    return references
+
+
 def _split_entries_for_batch(
-    entries: List[Dict], max_prompt_chars: int = 10000
+    entries: List[Dict],
+    max_prompt_chars: int = 10000,
+    base_prompt_chars: Optional[int] = None,
+    prompt_path: Optional[str] = None,
+    preferences: str = "",
+    output_language_instruction: str = "",
+    sectors: Optional[List[Dict]] = None,
+    duplicate_titles: Optional[List[Dict]] = None,
 ) -> List[List[Dict]]:
-    """将entries分成多个批次，每批不超过max_prompt_chars字符"""
+    """Split entries into batches that fit within ``max_prompt_chars``.
+
+    ``base_prompt_chars`` is the length of the prompt rendered without any
+    entries; when omitted it is measured with the same arguments used to
+    build the real prompt.
+    """
     if not entries:
         return []
+
+    if base_prompt_chars is None:
+        base_prompt_chars = len(
+            _build_batch_prompt(
+                [],
+                prompt_path,
+                preferences=preferences,
+                output_language_instruction=output_language_instruction,
+                sectors=sectors,
+                duplicate_titles=duplicate_titles,
+                short_references=True,
+            )
+        )
+
+    # The rendered prompt replaces the empty entries array ("[]") with the
+    # real one, so the entries JSON may occupy this many characters.
+    entries_budget = max_prompt_chars - base_prompt_chars + 2
 
     batches = []
     current_batch = []
     current_chars = 0
 
-    # 预留prompt模板和JSON包装的空间
-    overhead = len(_build_batch_prompt([])) + 500
-
     for entry in entries:
-        # 估算该entry在JSON中的字符数
-        entry_chars = len(
-            json.dumps(
-                {
-                    "link": entry.get("link", ""),
-                    "title": entry.get("title", "")[:100],
-                    "source": entry.get("source", ""),
-                    "published": entry.get("published", ""),
-                    "content": entry.get("content", "")[:1000],
-                },
-                ensure_ascii=False,
-            )
-        )
+        entry_chars = _entry_json_cost(_scoring_reference_entries([entry])[0])
 
-        # 如果当前批次加上这个entry会超出限制，且当前批次不为空，则创建新批次
-        if current_chars + entry_chars + overhead > max_prompt_chars and current_batch:
+        # The rendered array is sum(elements) + 2 * count + 2.
+        projected = current_chars + entry_chars + 2 * (len(current_batch) + 1) + 2
+        if projected > entries_budget and current_batch:
             batches.append(current_batch)
             current_batch = [entry]
             current_chars = entry_chars
@@ -413,7 +473,6 @@ def _split_entries_for_batch(
             current_batch.append(entry)
             current_chars += entry_chars
 
-    # 添加最后一个批次
     if current_batch:
         batches.append(current_batch)
 
@@ -440,9 +499,9 @@ def _reconcile_batch_results(
 
     if len(results) != len(entries) or len(matched_results) != len(entries):
         missing_links = sorted(entry_links - result_links)
-        error_message = (
-            "批次{batch} 评分结果异常: 输入{input_count}, 返回{output_count}, "
-            "匹配{matched_count}, 未评分链接({missing_count}): {missing}"
+        message = (
+            "批次{batch} 评分结果: 输入{input_count}, 返回{output_count}, "
+            "保留{matched_count}, 模型省略({missing_count}): {missing}"
         ).format(
             batch=batch_index + 1,
             input_count=len(entries),
@@ -451,7 +510,7 @@ def _reconcile_batch_results(
             missing_count=len(missing_links),
             missing=missing_links,
         )
-        print(f"⚠️ {error_message}")
+        print(f"ℹ️ {message}")
 
     # Reconciliation gaps are recorded locally but do not warrant a push alert.
     return matched_results, []
@@ -462,16 +521,35 @@ async def _score_single_batch(
     config: Dict,
     batch_index: int = 0,
     semaphore: Optional[asyncio.Semaphore] = None,
+    sectors: Optional[List[Dict]] = None,
+    duplicate_titles: Optional[List[Dict]] = None,
 ) -> Tuple[List[Dict], List[str]]:
     """对单批entries进行评分，失败后等待指定时间重试"""
     # 从config获取批量评分提示词路径
     prompt_path = config.get("prompts", {}).get("score_batch", "prompts/score_batch.md")
     preferences = config.get("personal_preferences", "")
+    # Scoring uses a short, batch-local correlation key instead of the source
+    # URL. Google News links are long opaque strings and models occasionally
+    # copy the wrong one, which then attributes a score to the wrong event.
+    # This key only correlates a response row with its input row; it carries no
+    # event identity and is never persisted.
+    prompt_entries = _scoring_reference_entries(entries)
+    original_link_by_reference = {}
+    reference_by_original = {}
+    for entry, prompt_entry in zip(entries, prompt_entries, strict=True):
+        reference = str(prompt_entry["link"])
+        original_link_by_reference[reference] = entry.get("link") or reference
+        if entry.get("link"):
+            reference_by_original[str(entry["link"])] = reference
+
     prompt = _build_batch_prompt(
-        entries,
+        prompt_entries,
         prompt_path,
         preferences=preferences,
         output_language_instruction=_output_language_instruction(config, json_mode=True),
+        sectors=sectors,
+        duplicate_titles=duplicate_titles,
+        short_references=True,
     )
 
     max_retries = int(config.get("batch_max_retries", 1))
@@ -496,7 +574,18 @@ async def _score_single_batch(
             if not isinstance(results, list):
                 raise ValueError(f"LLM返回的不是数组: {type(results)}")
 
-            matched_results, errors = _reconcile_batch_results(entries, results, batch_index)
+            for item in results:
+                if isinstance(item, dict):
+                    original_link = str(item.get("link") or "")
+                    if original_link in reference_by_original:
+                        item["link"] = reference_by_original[original_link]
+
+            matched_results, errors = _reconcile_batch_results(
+                prompt_entries, results, batch_index
+            )
+            for item in matched_results:
+                reference = str(item.get("link") or "")
+                item["link"] = original_link_by_reference.get(reference, reference)
             if attempt > 0:
                 print(f"✅ 批次{batch_index + 1} 评分重试成功")
                 logger.info("批次%s 评分重试成功 (第%s次尝试)", batch_index + 1, attempt + 1)
@@ -531,7 +620,10 @@ async def _score_single_batch(
 
 
 async def score_batch(
-    entries: List[Dict], config: Dict
+    entries: List[Dict],
+    config: Dict,
+    sectors: Optional[List[Dict]] = None,
+    duplicate_titles: Optional[List[Dict]] = None,
 ) -> Tuple[List[Dict], List[str]]:
     """
     批量评分 - 智能分批处理
@@ -539,6 +631,9 @@ async def score_batch(
     根据数据量自动决定分批策略：
     - 小批量：一次性发送
     - 大批量：分成多个批次并行处理
+
+    ``sectors`` 是本次评分允许使用的板块列表（来自 ``sector`` 表中
+    ``enabled=true`` 的记录），同时用于 prompt 注入与落库前过滤。
     """
     if not entries:
         return [], []
@@ -549,7 +644,16 @@ async def score_batch(
     consecutive_threshold = int(config.get("batch_consecutive_failure_threshold", 3))
 
     # 分批
-    batches = _split_entries_for_batch(entries, max_prompt_chars)
+    prompt_path = config.get("prompts", {}).get("score_batch", "prompts/score_batch.md")
+    batches = _split_entries_for_batch(
+        entries,
+        max_prompt_chars,
+        prompt_path=prompt_path,
+        preferences=config.get("personal_preferences", ""),
+        output_language_instruction=_output_language_instruction(config, json_mode=True),
+        sectors=sectors,
+        duplicate_titles=duplicate_titles,
+    )
     print(
         f"📦 分成 {len(batches)} 个批次评分 (共 {len(entries)} 条, "
         f"max_prompt_chars={max_prompt_chars})"
@@ -557,21 +661,34 @@ async def score_batch(
 
     # 如果只有一批，直接处理
     if len(batches) == 1:
-        scores, errors = await _score_single_batch(batches[0], config, batch_index=0)
+        scores, errors = await _score_single_batch(
+            batches[0],
+            config,
+            batch_index=0,
+            sectors=sectors,
+            duplicate_titles=duplicate_titles,
+        )
         alert_errors = errors if len(batches) >= consecutive_threshold else []
         if errors and not alert_errors:
             logger.warning(
                 "Scoring batch failure did not reach consecutive threshold (%s), skipping alert notification",
                 consecutive_threshold,
             )
-        return _merge_scores(entries, scores), alert_errors
+        return _merge_scores(entries, scores, sectors), alert_errors
 
     # 多批并行处理（限制并发数）
     semaphore = asyncio.Semaphore(max_concurrent_batches)
 
     # 并发处理所有批次
     batch_tasks = [
-        _score_single_batch(batch, config, batch_index=batch_index, semaphore=semaphore)
+        _score_single_batch(
+            batch,
+            config,
+            batch_index=batch_index,
+            semaphore=semaphore,
+            sectors=sectors,
+            duplicate_titles=duplicate_titles,
+        )
         for batch_index, batch in enumerate(batches)
     ]
     batch_results = await asyncio.gather(*batch_tasks)
@@ -600,13 +717,288 @@ async def score_batch(
             consecutive_threshold,
         )
 
-    return _merge_scores(entries, all_scores), alert_errors
+    return _merge_scores(entries, all_scores, sectors), alert_errors
 
 
-def _merge_scores(entries: List[Dict], scores: List[Dict]) -> List[Dict]:
+MAX_ASSETS = 5
+
+
+def normalize_assets(assets: object, limit: int = MAX_ASSETS) -> List[str]:
+    """Normalize asset symbols so one entity always maps to a single form.
+
+    Assets are English-only by contract: strip ``$`` and whitespace, uppercase,
+    and drop anything non-ASCII. Dropping non-ASCII is deliberate — a Chinese
+    name means the model ignored the prompt, and keeping it would reintroduce
+    the second spelling of the same entity. At most ``limit`` survive: beyond
+    that the list is noise, not signal.
+
+    Public because the master's report path must apply the same rules to values
+    a slaver passed through; a second implementation would drift.
+    """
+    if not isinstance(assets, list):
+        return []
+
+    normalized: List[str] = []
+    for raw in assets:
+        if not isinstance(raw, str):
+            continue
+        name = raw.strip().lstrip("$").strip()
+        name = "".join(name.split())
+        if not name or len(name) > 40 or not name.isascii():
+            continue
+        name = name.upper()
+        if name not in normalized:
+            normalized.append(name)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+WATCHLIST_ASSET_CLASSES = ("stock", "crypto", "commodity")
+
+#: The prompt asks for the English enum, but a model slip can still return the
+#: Chinese label — map it back instead of dropping the whole extraction.
+_ASSET_CLASS_ALIASES = {
+    "stock": "stock",
+    "equity": "stock",
+    "股票": "stock",
+    "股票etf": "stock",
+    "etf": "stock",
+    "index": "stock",
+    "指数": "stock",
+    "crypto": "crypto",
+    "cryptocurrency": "crypto",
+    "加密货币": "crypto",
+    "代币": "crypto",
+    "commodity": "commodity",
+    "commodities": "commodity",
+    "大宗商品": "commodity",
+    "商品": "commodity",
+}
+
+WATCHLIST_ALIAS_LIMIT = 10
+WATCHLIST_ASSET_LIMIT = 20
+
+
+def normalize_asset_class(value: object) -> str:
+    """Map a model-returned asset class onto the three allowed values."""
+    text = str(value or "").strip().lower()
+    return _ASSET_CLASS_ALIASES.get(text, "stock")
+
+
+def normalize_watchlist_aliases(value: object, asset: str = "") -> List[str]:
+    """Clean the alias list: strip, dedupe, cap, and drop the symbol itself."""
+
+    def clean(raw: object) -> str:
+        return str(raw).strip() if isinstance(raw, str) else ""
+
+    if isinstance(value, str):
+        raw_items: List[object] = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    symbol = asset.strip().upper()
+    result: List[str] = []
+    seen = set()
+    for raw in raw_items:
+        name = clean(raw)
+        if not name or len(name) > 64:
+            continue
+        key = name.casefold()
+        if symbol and key == symbol.casefold():
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(name)
+        if len(result) >= WATCHLIST_ALIAS_LIMIT:
+            break
+    return result
+
+
+def _parse_json_object(response: str) -> Dict:
+    """Parse a single JSON object, tolerating markdown fences and extra prose."""
+    text = response.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+
+    parsed = None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group())
+            except json.JSONDecodeError:
+                parsed = None
+    if not isinstance(parsed, dict):
+        raise ValueError(f"无法从响应中解析 JSON 对象: {response[:200]}...")
+    return parsed
+
+
+async def recognize_watchlist_assets(text: str, config: Dict) -> List[Dict]:
+    """Recognise every explicit, normalisable watchlist asset in pasted text."""
+    prompt_path = str(
+        (config.get("prompts") or {}).get(
+            "watchlist_asset", "prompts/watchlist_asset.md"
+        )
+    )
+    prompt = load_prompt(prompt_path, text=text)
+    response = await call_llm(
+        prompt, config, response_format={"type": "json_object"}
+    )
+    data = _parse_json_object(response)
+
+    candidates = data.get("assets")
+    if not isinstance(candidates, list):
+        candidates = [data] if data.get("asset") else []
+
+    result: List[Dict] = []
+    positions = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        normalized = normalize_assets([candidate.get("asset")], limit=1)
+        if not normalized:
+            continue
+        asset = normalized[0]
+        aliases = normalize_watchlist_aliases(candidate.get("aliases"), asset)
+        if asset in positions:
+            existing = result[positions[asset]]
+            existing["aliases"] = normalize_watchlist_aliases(
+                [*(existing["aliases"] or []), *aliases], asset
+            )
+            continue
+        positions[asset] = len(result)
+        result.append(
+            {
+                "asset": asset,
+                "asset_class": normalize_asset_class(candidate.get("asset_class")),
+                "aliases": aliases,
+            }
+        )
+        if len(result) >= WATCHLIST_ASSET_LIMIT:
+            break
+    return result
+
+
+def _filter_sectors(sectors: object, known: List[Dict]) -> List[str]:
+    """Keep only sector names that exist, so hallucinated labels never persist."""
+    if not isinstance(sectors, list) or not known:
+        return []
+
+    allowed = {s["name"] for s in known}
+    result: List[str] = []
+    for name in sectors:
+        if isinstance(name, str) and name in allowed and name not in result:
+            result.append(name)
+    return result
+
+
+DIRECTIONS = ("bullish", "bearish", "neutral")
+
+
+def _clean_text(value: object) -> str:
+    """Collapse a model-returned display string, rejecting non-string values.
+
+    A JSON field can arrive as ``null``, a number or a nested object; writing
+    that straight into ``Signal.title`` would either crash the insert or store
+    a value the portal cannot render.
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+#: Phrases a model reaches for when the input carries no facts. The prompt
+#: tells it to drop such input instead, but a model that ignores the
+#: instruction will happily write a sentence about how little it knows —
+#: which then shows up in the reader's digest as a meta-commentary line.
+#: These are matched on the summary, and the entry is dropped.
+LOW_CONTENT_MARKERS = (
+    "无法确认",
+    "无法验证",
+    "不可验证",
+    "缺乏事实",
+    "缺乏可验证",
+    "无实质信息",
+    "无明确事实",
+    "不足以判断",
+    "难以形成明确判断",
+    "不构成可判断",
+    "不构成有效信号",
+    "仅作去重存档",
+    "仅作存档",
+    "需等待原文",
+    "待原文补充",
+    "内容缺失",
+    "正文缺失",
+    "无法解析",
+    "未抓取到正文",
+    "no verifiable facts",
+    "cannot be verified",
+    "insufficient information",
+    "not enough information",
+    "no clear investment",
+)
+
+
+def looks_like_low_content(summary: str) -> bool:
+    """Whether a summary is commentary about the input rather than about it.
+
+    The wording alone is not enough: a solid analysis often notes that the
+    market has no revenue data yet ("尚无用户与收入数据"), which is normal
+    research judgment, not a confession. Only the sentence-enders that name
+    the *whole input* as unusable count — "无法确认"、"缺乏事实"、
+    "不构成可判断信号" — because those describe the entry, not the company.
+    """
+    text = (summary or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in text or marker.lower() in lowered for marker in LOW_CONTENT_MARKERS)
+
+
+#: Below this length the body carries no facts to analyse — a title, a
+#: publisher line, a subscription prompt.
+LOW_CONTENT_BODY_CHARS = 300
+
+
+def is_low_content_entry(summary: str, content: str) -> bool:
+    """Whether an entry has nothing to read.
+
+    Two independent signals must agree: the body is too short to carry facts,
+    *and* the summary is the model commenting on the absence of facts. Either
+    alone misfires — a short body can still be a crisp one-liner worth
+    keeping, and a long body analysed with caveats is perfectly good.
+    """
+    body = (content or "").strip()
+    if len(body) >= LOW_CONTENT_BODY_CHARS:
+        return False
+    return looks_like_low_content(summary)
+
+# Marks a merged entry as actually scored. Callers that must not treat an
+# unscored entry as a zero-scored signal (master's report pipeline) read it.
+SCORED_FLAG = "scored_ok"
+
+
+def _merge_scores(
+    entries: List[Dict],
+    scores: List[Dict],
+    sectors: Optional[List[Dict]] = None,
+) -> List[Dict]:
     """将评分结果合并到原始entries中"""
     # 构建link到score的映射
     score_map = {s.get("link"): s for s in scores if s.get("link")}
+    known_sectors = sectors or []
 
     merged = []
     for entry in entries:
@@ -620,21 +1012,93 @@ def _merge_scores(entries: List[Dict], scores: List[Dict]) -> List[Dict]:
                 score_value = int(score_value)
             except (ValueError, TypeError):
                 score_value = 0
+        if score_value is None:
+            # `Signal.score` is NOT NULL; an entry the model never saw is
+            # zero-scored here and flagged as unscored via SCORED_FLAG.
+            score_value = 0
 
+        direction = score_data.get("direction")
+        if direction not in DIRECTIONS:
+            # A slaver may pass its own extraction through (§6.3); keep it when
+            # the model returned nothing usable rather than silently dropping it.
+            direction = entry.get("direction")
+            if direction not in DIRECTIONS:
+                direction = "neutral"
+
+        assets = normalize_assets(score_data.get("assets")) or normalize_assets(
+            entry.get("assets")
+        )
+
+        # `keywords` drives signal-to-signal dedup, so an entry the model left
+        # without a usable list still needs the fixed 10 keywords built locally
+        # (§5.2) — same fallback the shared-pool import path uses.
+        keywords = normalize_keywords(score_data.get("keywords"))
+        if not keywords:
+            keywords = build_keywords(
+                f"{entry.get('title', '')} {entry.get('content', '')}"
+            )
+
+        # `title` and `summary` are display fields the pool shows verbatim, so an
+        # untouched RSS title next to a model-written summary is what produced
+        # mixed-language rows (English title + Chinese summary). Overwrite both
+        # with the configured output language and only fall back to the source
+        # text when the model returned nothing usable for that field.
+        title = _clean_text(score_data.get("title")) or _clean_text(entry.get("title"))
+        summary = _clean_text(score_data.get("summary")) or _clean_text(
+            entry.get("summary")
+        )
+
+        # A model that ignored the "drop empty input" instruction writes a
+        # sentence about how little it knows. That is commentary, not
+        # content, and it must never reach the reader's digest.
+        low_content = bool(score_data.get("is_low_content", False))
+        if not low_content and is_low_content_entry(
+            summary, str(entry.get("content") or "")
+        ):
+            low_content = True
+        if low_content:
+            title = ""
+            summary = ""
+
+        filtered_sectors = _filter_sectors(
+            score_data.get("sectors"), known_sectors
+        )
         merged.append(
             {
                 **entry,
-                "tags": score_data.get("tags", entry.get("tags", [])),
+                "title": title,
                 "score": score_value,
-                "summary": score_data.get("summary", entry.get("summary", "")),
+                "summary": summary,
                 "quality_score": score_data.get("quality_score", 0),
                 "interest_score": score_data.get("interest_score", 0),
-                "keywords": score_data.get("keywords", []),
+                # Compatibility with older models: accept the legacy marker,
+                # but the current prompt omits duplicate items entirely.
+                "is_duplicate": bool(score_data.get("is_duplicate", False)),
+                "duplicate_of": str(score_data.get("duplicate_of") or ""),
+                # A daily/weekly roundup carries several unrelated events in
+                # one row. The prompt tells the model to flag it (§5.1) and
+                # the pipeline drops it instead of storing a row that reads
+                # like five signals at once.
+                "is_aggregate": bool(score_data.get("is_aggregate", False)),
+                # Only a title and a publisher: there is nothing for the
+                # reader to read. The prompt tells the model to flag it and
+                # leave the summary empty (§5.1).
+                "is_low_content": low_content,
+                # Readable but with no actionable increment for an investor:
+                # price recaps, event announcements, version notes, rumour.
+                "is_low_value": bool(score_data.get("is_low_value", False)),
+                "keywords": keywords,
+                "assets": assets,
+                "direction": direction,
+                "sectors": filtered_sectors,
+                "region": normalize_signal_region(
+                    score_data.get("region"), filtered_sectors
+                ),
+                SCORED_FLAG: link in score_map,
             }
         )
 
     return merged
-
 
 
 async def generate_immediate_push(
@@ -648,7 +1112,7 @@ async def generate_immediate_push(
         recent_push_context: 近期推送上下文，用于去重
     """
     prompt_path = config.get("prompts", {}).get(
-        "immediate_push", "prompts/immediate_push.txt"
+        "immediate_push", "prompts/immediate_push.md"
     )
 
     # 直接使用传入的entries，转为JSON格式传给prompt
@@ -679,7 +1143,7 @@ async def compose_digest(
 
     Args:
         entries: 原始entries列表
-        context: 历史碎片化信息（用于去重参考），只保留 title, published, tags, summary, source
+        context: 历史碎片化信息（用于去重参考），只保留 title, published, sectors, summary, source
         config: LLM配置
         recent_push_context: 近期汇总推送上下文，用于去重
     """
@@ -688,11 +1152,11 @@ async def compose_digest(
     # context 只保留必要字段，拼接成字符串
     context_text = []
     for c in context:
-        tags_str = ", ".join(c.get("tags", [])) if c.get("tags") else ""
+        sectors_str = ", ".join(c.get("sectors", [])) if c.get("sectors") else ""
         context_text.append(
             f"[score: {c.get('score', 0)}] title:{c.get('title', '')}\n"
             f"published: {c.get('published', '')}\n"
-            f"tags: {tags_str}\n"
+            f"sectors: {sectors_str}\n"
             f"source: {c.get('source', '')}\n"
             f"summary: {c.get('summary', '')}"
         )
@@ -706,7 +1170,7 @@ async def compose_digest(
             "quality_score": entry.get("quality_score", 0),
             "interest_score": entry.get("interest_score", 0),
             "summary": entry.get("summary", ""),
-            "tags": entry.get("tags", []),
+            "sectors": entry.get("sectors", []),
             "published": entry.get("published", ""),
             "content": str(entry.get("content", ""))[:1500],
         }
@@ -728,94 +1192,6 @@ async def compose_digest(
         return await call_llm(prompt, config)
     except Exception:
         raise
-
-
-async def summarize_github_trending(
-    enriched_repos: List[Dict], config: Dict
-) -> Tuple[str, Optional[str]]:
-    """GH 板块总结:从 enriched 候选中选 1-max_items + 写 markdown。不传历史上下文。"""
-    prompt_path = config.get("prompts", {}).get(
-        "section_github", "prompts/section_github.md"
-    )
-    max_items = (
-        config.get("sections", {}).get("github_trending", {}).get("max_items", 3)
-    )
-    prompt = load_prompt(
-        prompt_path,
-        repos_json=json.dumps(enriched_repos, ensure_ascii=False, indent=2),
-        max_items=max_items,
-        output_language_instruction=_output_language_instruction(config),
-    )
-    try:
-        return await call_llm(prompt, config), None
-    except Exception as e:
-        msg = _llm_error_message("summarize_github_trending 失败", e)
-        print(f"⚠️ {msg}")
-        return "", msg
-
-
-async def select_ai_related_hn(
-    candidates: List[Dict], k: int, config: Dict
-) -> Tuple[List[str], Optional[str]]:
-    """轻 LLM:从 HN 首页候选元数据中挑 k 个 AI 相关 id。
-
-    输入候选只含 id/title/site/points/comments 字段(不含正文)。
-    """
-    prompt_path = config.get("prompts", {}).get(
-        "section_hackernews_select", "prompts/section_hackernews_select.md"
-    )
-    slim = [
-        {
-            "id": c.get("id"),
-            "title": c.get("title", ""),
-            "site": c.get("site", ""),
-            "points": c.get("points", 0),
-            "comments": c.get("comments", 0),
-        }
-        for c in candidates
-    ]
-    prompt = load_prompt(
-        prompt_path,
-        k=k,
-        candidates_json=json.dumps(slim, ensure_ascii=False, indent=2),
-    )
-    try:
-        response = await call_llm(prompt, config)
-    except Exception as e:
-        msg = _llm_error_message("select_ai_related_hn 失败", e)
-        print(f"⚠️ {msg}")
-        return [], msg
-
-    try:
-        ids = _parse_llm_json_response(response)
-    except ValueError as e:
-        msg = _llm_error_message("select_ai_related_hn 解析失败", e)
-        print(f"⚠️ {msg}")
-        return [], msg
-
-    if not isinstance(ids, list):
-        return [], "select_ai_related_hn 返回非数组"
-    return [str(x) for x in ids][:k], None
-
-
-async def summarize_hackernews(
-    enriched_stories: List[Dict], config: Dict
-) -> Tuple[str, Optional[str]]:
-    """对输入的 K 个 enriched stories 行文(K 由 select_k 决定)。不传历史上下文。"""
-    prompt_path = config.get("prompts", {}).get(
-        "section_hackernews", "prompts/section_hackernews.md"
-    )
-    prompt = load_prompt(
-        prompt_path,
-        stories_json=json.dumps(enriched_stories, ensure_ascii=False, indent=2),
-        output_language_instruction=_output_language_instruction(config),
-    )
-    try:
-        return await call_llm(prompt, config), None
-    except Exception as e:
-        msg = _llm_error_message("summarize_hackernews 失败", e)
-        print(f"⚠️ {msg}")
-        return "", msg
 
 
 async def generate_trend_insights(

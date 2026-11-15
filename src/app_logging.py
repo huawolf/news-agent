@@ -1,12 +1,28 @@
 """Portable daily directory logging."""
+from __future__ import annotations
 
 import logging
 import shutil
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 
 LOG_NAMES = ("app", "fetch", "push", "web", "mcp", "audit")
+
+ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("src.fetcher", ("app", "fetch")),
+    ("src.adapters", ("app", "fetch")),
+    ("src.adapters.crypto_crawler", ("app", "fetch")),
+    ("src.pipeline", ("app", "fetch")),
+    ("src.orchestrator", ("app", "fetch")),
+    ("src.dedup", ("app", "fetch")),
+    ("src.push", ("app", "push")),
+    ("src.api", ("app", "web")),
+    ("src.server", ("app", "web")),
+    ("src.master_mcp", ("app", "mcp")),
+    ("src.audit", ("app", "audit")),
+)
 
 
 def current_log_dir(log_root: Path) -> Path:
@@ -24,14 +40,34 @@ def cleanup_log_dirs(log_root: Path, retention_days: int = 30) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
-def configure_logging(log_dir: Path, retention_days: int = 30) -> logging.Logger:
-    logger = logging.getLogger("news_agent")
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-    cleanup_log_dirs(log_dir, retention_days)
-    if getattr(logger, "_news_agent_configured", False):
-        return logger
+def _targets(name: str) -> tuple[str, ...]:
+    for prefix, files in ROUTES:
+        if name == prefix or name.startswith(prefix + "."):
+            return files
+    return ("app",)
 
+
+class _RouteFilter(logging.Filter):
+    def __init__(self, log_name: str):
+        super().__init__()
+        self.log_name = log_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return self.log_name in _targets(record.name)
+
+
+def configure_logging(log_dir: Path, retention_days: int = 30) -> logging.Logger:
+    """Attach subsystem file handlers and a console stream exactly once."""
+    root = logging.getLogger()
+    if any(
+        isinstance(filter_, _RouteFilter)
+        for handler in root.handlers
+        for filter_ in handler.filters
+    ):
+        root.setLevel(logging.INFO)
+        return logging.getLogger("news_agent")
+
+    cleanup_log_dirs(log_dir, retention_days)
     daily_dir = current_log_dir(log_dir)
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)-5s %(name)s %(message)s",
@@ -40,8 +76,11 @@ def configure_logging(log_dir: Path, retention_days: int = 30) -> logging.Logger
     for name in LOG_NAMES:
         handler = logging.FileHandler(daily_dir / f"{name}.log", encoding="utf-8")
         handler.setFormatter(formatter)
-        logger.getChild(name).addHandler(handler)
-        logger.getChild(name).setLevel(logging.INFO)
-        logger.getChild(name).propagate = False
-    logger._news_agent_configured = True
-    return logger
+        handler.addFilter(_RouteFilter(name))
+        root.addHandler(handler)
+
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(formatter)
+    root.addHandler(console)
+    root.setLevel(logging.INFO)
+    return logging.getLogger("news_agent")

@@ -8,4 +8,7 @@ Set-Location $ProjectDir
 
 $Uv = (Get-Command uv -ErrorAction Stop).Source
 & $Uv run --no-sync python -m src.main service uninstall
+if ($LASTEXITCODE -ne 0) {
+    throw "Service uninstall failed with exit code $LASTEXITCODE."
+}
 Write-Host "News Agent service removed. User configuration and news data were kept."

@@ -103,7 +103,7 @@ async def enrich_repos(
         )
 
     enriched: List[Dict] = []
-    for r, candidate in zip(results, candidates):
+    for r, candidate in zip(results, candidates, strict=True):
         if isinstance(r, Exception):
             errors.append(f"enrich {candidate['full_name']} 失败: {r}")
         elif r is not None:

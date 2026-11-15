@@ -1,503 +1,221 @@
-# News Agent Architecture & Technical Specification
+# News Agent - System Architecture
 
-> **Status:** Core control plane implemented. The codebase provides a local Web/API server, stdio MCP server, in-application scheduler, file-based logging, and cross-platform service lifecycle installers. Native installation and service recovery across macOS, Windows, and Linux require validation on target environments. Legacy Linux/systemd details are archived in [archive/tech-spec-systemd.md](archive/tech-spec-systemd.md).
+> **Status:** Current implementation, checked against the repository on 2026-11-14.
 >
-> **Goal:** Evolve News Agent from a single-machine Linux script into a local, cross-platform personal intelligence digest service for macOS, Windows, and Linux. Both human users (via a local Web UI) and AI agents (via Model Context Protocol) manage the same configuration, validation logic, background jobs, and audit logs.
+> **Purpose:** Describe the implemented master/slaver investment-signal system. The master collects shared sources, serves the public portal and backoffice, and accepts reports from slavers. A slaver can pull the shared pool, collect private sources, and deliver local digests. Integrations that are not present in this repository are listed separately as external boundaries.
+>
+> There are exactly two runtime modes, `master` and `slaver`. A slaver connects to a master only when `server_url` is configured.
+>
+> **Reading guide:** start with the [README](../README.md) for installation and commands, and use [config.json.example](../config.json.example) as the authoritative configuration reference. This page covers scope, topology, deployment, identity, and security. Detailed contracts are split across the documents below; code and tests remain the final authority.
 
-Refer to [roadmap.md](roadmap.md) for milestone execution order and pending tasks.
+## Architecture documents
 
----
+| Sections | Document | Contents |
+|---|---|---|
+| 1-4 | System architecture | Scope, runtime topology, gateway, identity, and security. |
+| 5-6 | [Data model and seeds](data-model-and-seeds.md) | Tables, indexes, sectors, seed import, and bilingual storage. |
+| 7-8 | [Processing and sync](processing-and-sync.md) | Fetch, scoring, ranking, deduplication, schedules, and sync. |
+| 9-10 | [MCP and HTTP APIs](mcp-and-http-api.md) | Reporting tools, API contracts, and authentication boundaries. |
+| 11 | [Web UI](web-ui.md) | Master portal, backoffice, and slaver console. |
+| 12-13 | [Integrations and status](integrations-and-status.md) | External boundaries, technology decisions, implemented status, and limitations. |
 
-## 1. Scope and Design Principles
-
-### 1.1 Objectives
-
-- **Single-User Local Service:** Operates locally on a single machine without user authentication, multi-tenancy, cloud control planes, or external database dependencies.
-- **Unified Source & Delivery Management:** Both users and AI agents can add/manage RSS sources, configure ranking preferences, item limits, delivery schedules, and notification channels.
-- **Dual Control Interfaces:** Provides a browser-based local Web console and a Python stdio MCP server.
-- **Flexible Execution Engine:** Supports cron-scheduled execution as well as instant manual/Agent execution for fetching, previewing, and pushing digests.
-- **Cross-Platform Consistency:** Ensures identical configuration, logging, API semantics, and job execution behaviors across macOS, Windows, and Linux.
-- **Standard File Logging:** Uses application-level rolling log files instead of platform-dependent system journals.
-
-### 1.2 Non-Goals
-
-- No multi-tenant isolation, user accounts, or team collaboration features.
-- No public or LAN exposure of local control plane APIs.
-- Generic user-added sources are RSS/Atom feeds. Non-RSS integrations are handled as built-in signal adapters under `sections.signals`.
-
-### 1.3 Core Principles
-
-- **Single Source of Truth:** `config.json` is the sole source of truth for user preferences; `.env` or OS credential stores manage API keys and secrets only.
-- **Unified Business Service Layer:** Web UI, REST API, and MCP must not mutate JSON files directly; all mutations must route through a shared core service layer.
-- **Single Execution Engine:** All scheduled, manual, and Agent-triggered tasks route through a unified Job Executor to enforce mutual exclusion and prevent duplicate fetches or pushes.
-- **Minimal OS Integration Boundary:** OS-level service managers (`launchd`, Windows Task Scheduler, `systemd`) are responsible solely for starting the local daemon on user login; business logic scheduling remains internal.
+Section numbers are preserved from the original architecture contract so existing code comments such as `§5.1` still map to the same headings.
 
 ---
 
-## 2. Target System Architecture
+## 1. Scope
+
+### 1.1 Goals
+
+- **Master/slaver separation:** one cloud master and many local slavers. A slaver can connect to the master through `server_url` or run fully locally.
+- **Investment signals:** every signal can carry sectors, related assets, and a bullish/bearish/neutral direction in addition to relevance scores.
+- **Public portal:** one page provides two top-level channels, Investment Signals and Yield. Investment Signals contains Hot, Following, and GitHub Trending views with sector, region, direction, score, and text filters; the API also supports `group=all`. Yield renders a separate opportunity table.
+- **Administration:** the master exposes a backoffice shell and admin-protected APIs. The web console currently manages LLM, RSS sources, watchlists, preferences, delivery, and scheduling. Sectors, users, deduplication records, energy, and sync state are available through backend APIs but are not yet rendered as dedicated pages.
+- **Cross-platform operation:** installers and service lifecycle helpers exist for macOS, Windows, and Linux. Native installation and recovery still require per-platform acceptance testing.
+- **Shared data model:** both modes use the same SQLAlchemy 2.0 models. The master requires the configured PostgreSQL DSN; a slaver defaults to a local SQLite file.
+
+### 1.2 Non-goals
+
+- **No market-data terminal:** no quotes, candles, volume charts, or portfolio accounting. This is a news and signal aggregator, not a trading terminal.
+- **No asset master data:** assets are normalized LLM output strings. There is no asset table, ticker validation, alias-maintenance UI, or instrument mapping.
+- **No post-publication attribution:** the system logs delivery and reporting paths but does not backtest signals or attribute later price movement.
+- **No in-place legacy migration:** old `config.json`, `mode_settings`, and file-storage data are not migrated. This iteration is a full refactor.
+
+### 1.3 Implemented portal and access behavior
+
+- The portal has two top-level channels, **Investment Signals** and **Yield**, rendered as compact text navigation with a thin active underline. Investment Signals is selected by default and contains the **Hot**, **Following**, and **GitHub Trending** tabs. Hot uses every enabled sector; there is no hardcoded sector allowlist.
+- Yield reads the current `yield_pool` snapshot and renders Pool, Protocol, Chain, Reference, TVL, 30-day APY, Today APY, and Maturity. Rows are sorted by Today APY descending by default and can be filtered by protocol and chain. The channel is read-only, exposes neither upload credentials nor write timestamps, and offers no delete action. Public responses omit `reporter` and `recorded_at`. Returning to Investment Signals restores the last selected secondary tab.
+- The Yield filter area always shows the bilingual risk notice. The English copy is:
+
+  > This channel covers stablecoin yield. The listed protocols have no record of default to date. Deposit stablecoins such as USDT/USDC directly on the destination page, or swap into the corresponding stablecoin to earn yield. Note: Pendle V2 carries low risk when held to maturity; exiting early may otherwise result in a loss of principal.
+
+- The portal toolbar provides sector selection, full-text search, search, and refresh. Direction, minimum score, and region are edited in a display-settings dialog; asset class is not a filter. Sector and region display names are localized through shared portal resources, while API and database values remain the canonical `sector.name` and region codes. Master and slaver use the same mapping.
+- An empty watchlist must make `group=watchlist` return an empty result, never the full pool. The Following view shows every watched asset with its seven-day hit count, for example `NVDA(3)`, above the list. Counts and rows share the current sector, region, direction, minimum-score, and search filters. Clicking an asset applies an exact `asset` filter; clicking again or clearing the filter restores all followed signals.
+- Anonymous feed and list APIs serve at most the latest seven days and do not accept a time-window argument; reporter history is the documented exception below. Signal lists support `group=all|hot|watchlist`, `sector`, `regions` as a comma-separated subset of `GLOBAL/CN/JP/EU`, `q`, `direction`, `min_score` applied as a strict comparison to `final_score`, exact `asset`, `locale`, and pagination.
+- The Following asset summary is `GET /api/server/watchlist-assets`. It accepts the same filters and returns `asset`, `asset_class`, and `count_7d` for every watched asset, including zero-count rows. Counts are aggregated in application code from one signal query, not one query per asset. Summary responses are cached in-process for five minutes per owner, watchlist asset/class fingerprint, and full filter set. Watchlist edits invalidate the key immediately; newly arriving signals may take up to five minutes to enter the counts.
+- A non-empty region filter keeps matching region-bearing signals plus every region-agnostic signal (`region IS NULL`). Search covers localized title, summary, and keywords plus source-language content and assets. Sectors and regions are not text-search fields. Search ranks exact asset matches first, title or keyword matches second, and other text matches third; ties preserve batch, score, and recency order.
+- Signal lists default to `batch_id DESC, final_score DESC, first_seen_at DESC, id DESC`. With a search term, relevance tiers are applied first and the same ordering is used inside each tier.
+- The portal default request uses `min_score=80` and `direction=bullish,bearish`; the threshold is strictly greater than 80 and neutral signals are not shown initially. The API itself does not force these defaults.
+- Display settings are mirrored to browser `localStorage`. For a signed-in manai-pic user, direction, minimum score, and region are also stored in `user_preference`; anonymous use and failed preference requests keep the browser copy only.
+- Every signal card shows the reporter. Manually reported signals show a clickable `@display_name`; locally collected signals show a non-clickable System label. The reporter route uses `#reporter=<user_id>`, survives refresh, and supports browser back and forward navigation.
+- Reporter profiles expose `display_name`, scored and displayable counts, high-score counts, overall and last-10 high-score rates, and complete public history. The history does not use the portal's seven-day window but still returns only signals with `score >= 60`.
+- A visible signal requires `score >= 60`. Rows below 60, plus aggregate, low-content, and low-value items, remain in `signal` as hidden rows for audit and reporter-rate denominators, but never appear in reader-facing queries. URL deduplication still considers hidden rows.
+- Each reporter may send at most `report.daily_limit_per_user` candidates into LLM scoring per local calendar day in `report.quota_timezone`; the default is 100 in `Asia/Shanghai`. URL duplicates are removed before reservation. Over-limit items are rejected with `quota_exceeded: daily scoring limit` and never reach the scorer.
+- Master admin authorization comes only from a verified manai-pic phone number or email matching `NEWS_AGENT_ADMINS`. The legacy `NEWS_AGENT_ADMIN_EMAIL` is also accepted. Email matching is case-insensitive, phone matching is exact, and an empty allowlist grants no admin access. The upstream `is_admin` value is ignored for authorization.
+- Natural-language scoring preferences are editable and injected into the scoring prompt. Ranking weights are runtime configuration and are not editable in the backoffice.
+- Membership data is read opportunistically from `auth.membership_database_url`. It does not grant access or enforce quotas.
+- Sync and report endpoints have no rate limiter in this implementation. FastAPI documentation routes are enabled by default. A public master must restrict both at the reverse proxy until application-level controls exist.
+
+### 1.4 Terminology
+
+| Term | Meaning |
+|---|---|
+| `master` | Cloud instance: all-source collection, shared signal pool, portal, backoffice, and report ingestion. |
+| `slaver` | Local instance: shared-pool pull, private-source collection, and personalized delivery. |
+| Signal | A collected or reported item with scores, sectors, assets, direction, region, and provenance. |
+| Sector | A configurable classification stored in `sector`; an LLM assigns enabled sector names. |
+| Deduplication | URL matching when a URL exists, followed by application-level BM25. |
+| Energy ledger | Local accounting entries for new pulls and reports; not the manai-pic account balance. |
+| Reporter | The verified manai-pic user id in `signal.reported_by`; the public alias is `user_profile.display_name`. |
+| Visible signal | A scored row with `score >= 60`; hidden rows remain stored but are excluded from reader paths. |
+| High-score rate | Rows satisfying `signal.score >= 60 AND signal.final_score > 80`, divided by all scored rows for that reporter. Overall and last-10 rates require at least ten samples. |
+
+---
+
+## 2. Runtime Modes and Topology
 
 ```text
-Browser Web UI                  MCP Client / Agent
-       |                                |
-       +----------- Local API ----------+
-                         |
-           Config / Source / Job Service Layer
-                  |              |
-                  |              +-- Scheduler (APScheduler)
-                  |
-           Config Files, Logs, Run Records
-                         |
-             Fetch -> Score -> Rank -> Push
-                         |
-              Discord / Feishu / Custom Webhook
+                        manai-pic (Go / Gin :5678)
+                        /api/v1/user/me  /api/v1/user/login
+                                  |
+                    issues JWT    |    verifies identity
+                  +---------------+----------------+
+                  |                                |
+         +--------v---------+          +-----------v------------+
+         | master (cloud)   |          | connected slaver       |
+         | Caddy -> :12301  |<-------->| `server_url` set       |
+         | PostgreSQL       |  HTTPS   | SQLite (default)       |
+         +--------+---------+          +-----------+------------+
+                  |                                |
+      +-----------+-----------+        +-----------+------------+
+      | portal  | backoffice |        | local UI | MCP client  |
+      | public  | admin JWT  |        | loopback | reports     |
+      +---------+------------+        +----------+-------------+
 ```
 
-The local daemon binds to `http://127.0.0.1:12301` by default (`123001` exceeds the TCP/UDP port limit of `65535`).
+The right-hand slaver in the diagram is the connected variant. A standalone slaver (`server_url` empty) has no manai-pic link and no master link.
 
-### Component Responsibilities
+The repository includes only a Caddy deployment example. Production routing is not asserted by this repository.
 
-- **Web UI:** Web-based control panel for feeds, preferences, delivery schedules, job statuses, logs, and historical runs.
-- **Local API:** REST API powering the Web UI and local automation tools.
-- **MCP Server:** Stdio-based MCP transport invoking the shared service layer.
-- **Scheduler:** In-process `APScheduler` handling cron and interval triggers.
-- **Job Executor:** Handles `fetch`, `push`, and `preview` execution with mutex locks, run states, and result persistence.
-- **Config Service:** Schema validation, atomic reads/writes, and notifying the Scheduler of changes.
-- **Logging & Audit Service:** Manages rolling log files and audits configuration modifications made by users or agents.
-- **LLM Alert Policy:** Scoring mismatches, malformed responses, and other processing errors remain in local logs; only LLM connection failures and timeouts trigger push error alerts. In the batch scoring stage, failed batches wait 5 minutes before retrying once (`batch_retry_delay_seconds: 300`, `batch_max_retries: 1`), and alerts are sent only when at least 3 consecutive batches fail (`batch_consecutive_failure_threshold: 3`).
+| Mode | Purpose | Database |
+|---|---|---|
+| `master` | Collect all shared sources, serve the public portal and backoffice, and accept slaver reports. It can also run the local scoring and push pipeline. | PostgreSQL DSN required. |
+| `slaver`, `server_url` empty | Run independently: collect local sources and push local digests. No pull or report. | SQLite by default. |
+| `slaver`, `server_url` set | Pull the master pool, collect local sources, avoid duplicate source work, and report local-only signals. | SQLite by default. |
 
-### 2.1 Server-Client & Mix Mode Architecture
+`server_url` is a configuration value, not a mode. There is no third mode for a connected slaver.
 
-To optimize LLM token usage and reduce cost across multiple deployments, the system supports a distributed Server-Client architecture configured via `mode_settings`:
+### 2.1 Standalone slaver
 
-- **Standalone Mode:** The daemon runs independently when explicitly selected.
-  Configurations without `mode_settings` receive the regular-user client
-  defaults.
-- **Mix Mode:** Acts as both a Server and a Client:
-  - **Server Responsibilities:** On every full run, fetches and scores every enabled news source, refreshes GitHub Trending, maintains a rolling 24-hour in-memory news cache plus the latest successful GitHub cache, and exposes the shared REST endpoints.
-  - **Delivery Responsibilities:** Uses the same unified news and GitHub pipeline for its own manual and scheduled deliveries; schedules select only time and final news count.
-- **Client Mode:** Client-only mode. It disables server-side collection and all local built-in source adapters, including GitHub Trending, Hacker News, Google News, and signals. Every scheduled push queries the server for both the pre-scored news pool from the last 24 hours, limited by the shared API to entries with `score >= 60`, and the pre-compiled GitHub section. Only user-added RSS feeds under `sources.add` that do not exist on the server are fetched and scored locally. The client merges both datasets and formats/delivers the digest.
-  Every delivery query requests the complete rolling 24-hour eligibility window;
-  local sent history removes delivered URLs. If the server is unavailable, the
-  client may continue fetching user-added RSS feeds but must not fall back to
-  fetching and scoring the server's bundled RSS or signal catalog.
+A slaver with an empty `server_url` is a complete single-machine deployment. It does not require manai-pic, a master, or PostgreSQL, and it does not mount the master MCP receiver. On first start it runs Alembic against the local SQLite database, imports the bundled seeds, then serves the loopback portal and console and schedules local fetch/push jobs.
 
-New regular-user configurations default to:
+The standalone mode still needs the resources required by the work it performs:
 
-```json
-"mode_settings": {
-  "mode": "client",
-  "server_url": "http://13.158.182.33:12301",
-  "server_api_token_name": "processednews"
+- Network access to the enabled RSS, Feed, and adapter sources.
+- An OpenAI- or Anthropic-compatible LLM endpoint for scoring and watchlist parsing.
+- Delivery credentials only when a push destination is enabled.
+- BrowserWorker only when Feed-page collection is enabled.
+
+`auth.main_url`, `NEWS_AGENT_ADMINS`, and the membership database are not part of startup, collection, or local delivery in this mode. Setting `server_url` is the single switch that adds master pull/report behavior and the related manai-pic login requirement.
+
+---
+
+## 3. Gateway and Deployment Shape
+
+The checked-in Caddy example mounts the service under `/news` on `vaneworker.com` and deliberately adds no `manai.cc` route. `www.vaneworker.com` redirects to the canonical apex so host-only login cookies and `localStorage` stay on one origin.
+
+```caddyfile
+www.vaneworker.com {
+    redir https://vaneworker.com{uri} 308
+}
+
+vaneworker.com {
+    redir /news /news/ 308
+    handle_path /news/* {
+        reverse_proxy 127.0.0.1:12301 {
+            header_up X-Forwarded-Prefix /news
+        }
+    }
 }
 ```
 
-Despite its historical field name, `server_api_token_name` contains the direct
-shared-news API value. `processednews` is not treated as a protected secret.
-It is completely separate from `NEWS_AGENT_LOCAL_TOKEN`, which optionally
-protects only the local Web configuration, jobs, logs, and management APIs.
-Neither credential is accepted as a fallback for the other's API surface.
+Use `handle_path`, not `handle` or a bare `reverse_proxy`: the application expects the prefix to be stripped and routes to remain `/` and `/api/*`. A wrong directive produces 404s because the backend receives `/news/api/...`.
 
----
-
-## 3. Configuration & Data Directory Layout
-
-### 3.1 Directory Structure
-
-Runtime files are saved in the project root directory by default (configurable via `NEWS_AGENT_DATA_DIR`):
-
-```text
-news-agent/
-  config.json
-  .env
-  news-data/
-    github-latest.md
-  logs/
-    app.log
-    fetch.log
-    push.log
-    web.log
-    mcp.log
-    audit.log
-  runs/
-```
-
-- `news-data/`: Retains data files (`fetch-*.json`, `push-*.md`, `notify-*.md`, `sent-history.json`, and the persistent `github-latest.md` cache), with dated artifacts automatically cleaned up after 30 days (`keep_days: 30`).
-- `runs/`: Stores structured JSON job execution summaries and statuses.
-
-### 3.2 Configuration Schema Evolution
-
-Top-level configuration schema with backward compatibility:
-
-```json
-{
-  "personal_preferences": "Prioritize AI agents, model releases, and practical developer tools. Prefer Chinese summaries.",
-  "llm": {
-    "model": "deepseek-v4-flash",
-    "baseUrl": "https://api.deepseek.com",
-    "protocol": "openai_chat",
-    "apiKeyName": "OPENAI_API_KEY",
-    "batch_retry_delay_seconds": 300,
-    "batch_max_retries": 1,
-    "batch_consecutive_failure_threshold": 3
-  },
-  "delivery": {
-    "timezone": "Asia/Shanghai",
-    "schedules": [
-      {
-        "id": "delivery-1",
-        "cron": "0 10 * * *",
-        "max_items": 10
-      },
-      {
-        "id": "delivery-2",
-        "cron": "0 20 * * *",
-        "max_items": 10
-      }
-    ],
-    "immediate": {"enabled": false, "threshold": 92, "daily_limit": 3}
-  }
-}
-```
-
-Delivery schedules control only timing and the final news item limit. Manual
-and scheduled runs always use the same unified pipeline: all enabled collection
-sources feed one scored news pool, GitHub is generated alongside it, and
-insights provide digest metadata rather than a separately selectable section.
-Mix and standalone servers persist the latest successful GitHub section in
-`news-data/github-latest.md`; the shared GitHub API reads this cache so an empty
-incremental GitHub result cannot erase the last successful content.
-
-`llm.protocol` supports `openai_chat`, `openai_responses`, and
-`anthropic_messages`. Protocol detection first examines the endpoint path:
-`/chat/completions`, `/responses` (or `/response`), and `/messages` take
-precedence. If the path is only a base URL, Claude family names (`claude`,
-`opus`, `sonnet`, or `haiku`) select Anthropic Messages, while OpenAI model
-names (`gpt`, `chatgpt`, `o1`, `o3`, or `o4`) select OpenAI Responses. Unknown
-models default to OpenAI Chat Completions for compatibility. The detected value
-is shown in the Web console and can be overridden before saving. Both base URLs
-and complete endpoint URLs are accepted; the request layer normalizes them
-without appending a duplicate protocol path.
-
-Legacy `schedule.push_cron` settings are automatically migrated to `delivery.schedules` upon initial load.
-When neither modern nor legacy delivery schedules are configured, the system
-defaults to daily deliveries at 10:00 and 20:00 in `delivery.timezone`, with a
-maximum of 10 news items per delivery. Explicit schedules, including an empty
-schedule list used to disable automatic delivery, are preserved.
-
-`delivery.schedules[].max_items` caps one combined headline list containing all
-news source types (10 by default). RSS, Hacker News, Google News, and signal
-adapters are inputs to this pool, not separately selectable delivery sections.
-GitHub is independently capped by
-`sections.github_trending.max_items` (3 by default) and starts numbering at 1.
-Each item consists of a title and concise core summary. Insights enrich card
-metadata and are not a separately selectable or delivered body section.
-The fixed delivery-title prefix follows the generated title language, preventing
-mixed Chinese/English card titles when a model deviates from the requested language.
-
-### 3.3 Mutation Safeguards & Concurrency Controls
-
-- **Validation:** Pydantic models validate types, value ranges, URLs, cron expressions, and webhook configurations.
-- **Atomic File Operations:** Uses inter-process file locks, temporary swap files, and atomic replaces to prevent corruption during concurrent edits.
-- **Versioning:** Increments configuration revision numbers on write.
-- **Auditing:** Writes sanitized audit trails to `audit.log` capturing timestamps, invocation sources (`web`/`mcp`/`api`), and mutation summaries (excluding sensitive credentials).
-- **Hot Reloading:** Notifies the in-process Scheduler to dynamically update jobs upon successful writes.
-
----
-
-## 4. Feed Management & Ranking Pipeline
-
-### 4.1 RSS Source Workflow
-
-```text
-Submit RSS URL
-  -> Protocol & Schema Validation
-  -> SSRF Prevention (Block localhost, RFC 1918 private IPs, intranet redirects)
-  -> Network Verification, RSS/Atom Parsing & Entry Preview
-  -> URL Deduplication
-  -> Write to sources.add & Hot-reload Next Fetch Cycle
-```
-
-Feed sources track runtime metrics: enablement status, last successful fetch timestamp, consecutive failure counter, last error message, and auto-pause flags.
-
-Every source is normalized to exactly one broad content category:
-
-- `ai`: AI & Frontier Technology
-- `developer_open_source`: Developers & Open Source
-- `product_startup`: Products & Startups
-- `business_investment`: Business & Investment
-- `technology_policy`: Technology Industry & Policy
-- `other`: General / Other
-
-The Web UI localizes these stable IDs into Chinese or English. Its source list
-shows only enabled sources used by the next fetch, supports category filtering,
-and allows RSS/Atom URLs to be removed. Removing a bundled URL adds it to the
-configuration block list; removing a user-added URL deletes it from `sources.add`.
-
-### 4.1.1 24-Hour Publication Cutoff Filter
-All fetched news entries (RSS, built-in signals, Hacker News, etc.) are subjected to a strict publication window (`fetch_lookback_minutes: 1440` by default). Entries with publication dates older than the configured lookback are automatically discarded before LLM scoring and persistence.
-
-### 4.1.2 Built-In Signal Adapters
-
-`sections.signals` feeds non-RSS and curated sources into the same entry contract used by RSS (`title`, `link`, `published`, `source`, `content`, `tags`, `score`, `summary`). Supported adapters include:
-
-- GitHub Trending total, JavaScript, and Chinese variants via HTML scraping.
-- Product Hunt via GraphQL when `PH_TOKEN` is configured.
-- Reddit via no-key pullpush.io fallback, then Reddit public JSON fallback.
-- V2EX create, share, and programmer nodes via public JSON API.
-- App Store China, Taiwan, US, Japan, and Korea via Apple RSS JSON.
-- 36Kr, Sspai, and OSChina via RSS.
-- Jike AI Explore, AI Discussion, and Engineers topics via RSSHub.
-- Google News `BUSINESS`, `TECHNOLOGY`, and `SCIENCE` topic RSS feeds for China
-  (`zh-CN`, `CN:zh-Hans`) and the United States (`en-US`, `US:en`). Each of the
-  six country/topic feeds contributes at most 20 entries per fetch.
-
-These entries are scored, deduplicated, stored, and delivered through the existing fetch pipeline.
-
-Google News uses a separate successful-fetch cursor for each country/topic feed,
-stored in `news-data/google-news-state.json`. A feed requests entries published
-after its own previous successful fetch; the initial and maximum recovery window
-is 24 hours. Failed feeds do not advance their cursors. Topic entries retain the
-country and topic tags and map to existing categories as follows:
-`BUSINESS -> business_investment`, `TECHNOLOGY -> technology_policy`, and
-`SCIENCE -> other`.
-
-Signal adapters apply a pre-scoring quality gate before entries reach the LLM. Product Hunt, App Store, Reddit, V2EX, Jike, and domestic media adapters keep AI / LLM / Agent / model-driven application signals and drop obvious noise such as entertainment-only apps, generic local services, roundup posts, casual speculation, unrelated hardware financing, and stale items outside the lookback window. GitHub variants allow AI infrastructure and developer-tool opportunities, but still filter unrelated trending repositories.
-
-### 4.2 Preference Prompting & Deterministic Re-ranking
-
-Natural language preference string `personal_preferences` guides LLM scoring. The final ranking uses a deterministic scoring formula:
-
-The scoring prompt treats three reader-value tracks as equal top priorities:
-actionable public-equity investment signals, evidence-backed startup opportunities,
-and major AI advances. High scores require concrete evidence such as earnings or
-guidance changes, supply/demand and regulatory catalysts, user/revenue/retention
-traction, validated capability gains, or material adoption. Topic labels, price
-moves, financing announcements, and unverified AI claims do not qualify by
-themselves.
-
-```text
-final_score = base_llm_score
-            + interest_match_bonus
-            + source_weight
-            + recency_bonus
-            - avoid_penalty
-            - duplicate_penalty
-```
-
-All news entries are combined and truncated according to the `max_items`
-parameter of the active schedule. GitHub is truncated independently. Hacker
-News and every other adapter enter the same fetch, LLM scoring, ranking, and
-digest path; no source type gets a second delivery summary.
-The digest receives up to three times the target item count from the ranked pool.
-Its prompt gives equal editorial priority to actionable public-equity news,
-evidence-backed startup opportunities, and major AI/technology advances. When the
-model returns fewer items than requested despite enough complete scored candidates,
-the system fills the remaining slots deterministically from that ranked pool.
-
-To optimize LLM token usage and reduce API cost without compromising digest quality, the system employs a two-stage scoring and lazy summarization pipeline:
-1. **First Stage (Batch Scoring & Rating):** Entry content snippets are truncated to 1,000 characters (down from 2,000). The LLM evaluates `quality_score`, `interest_score`, `score`, `tags`, and `keywords` without generating full summaries during scoring.
-2. **Second Stage (Digest Synthesis & Lazy Summarization):** High-quality candidates passing the score threshold enter digest synthesis (`compose_digest` / `generate_immediate_push`), where the model generates Markdown headlines and summaries directly for selected items.
-3. **Slimmed Deduplication Context:** Recent push history provided for LLM deduplication is formatted as a compact `[Title | Link | Summary]` list rather than raw multi-paragraph Markdown.
-
-When digest synthesis combines multiple reports about the same event into one
-headline, it must retain every cited source URL. Link labels are numbered in
-source order (`Read original 1`, `Read original 2`, or their Chinese
-equivalents); single-source headlines keep the unnumbered label. Sent-history
-tracking continues to mark each URL that appears in the delivered Markdown.
-
-Sent history records all candidate and repository URLs that occur in the final delivered Markdown.
-URLs are canonicalized by stripping tracking query parameters (`utm_*`, `spm`, `from`, `ref`, etc.), fragments, and trailing slashes.
-To guarantee that items sent in the morning are never resent in the afternoon (even across restarts or missing history files):
-- **Direct Markdown Extraction:** All delivered URLs are extracted directly from the delivered Markdown digest via `extract_urls_from_markdown`.
-- **Dual-Layer History Loading:** `load_sent_links` reads `sent-history.json` and actively scans recent `push-*.md` and `notify-*.md` files on disk.
-- **Intra-Day GitHub Filtering:** The GitHub section is filtered via `filter_github_section` against `sent_links`. If all repositories in today's digest have already been delivered earlier in the day, the GitHub section is cleanly omitted from subsequent pushes instead of repeating identical repositories.
-Model inputs omitted from immediate or scheduled output remain eligible for a later
-delivery for up to 24 hours; the previous push timestamp does not discard an unsent
-candidate. Filter logs report score, sent-history, cutoff, diversity,
-candidate-pool, and final-limit counts for each run.
-
-### 4.3 GitHub Trending Deduplication & Permanent History Retention
-
-GitHub repositories processed or sent by the system are recorded in `news-data/trending-history.json`. To enforce strict permanent deduplication ("historically sent repositories are never re-sent"), repository URLs are normalized (lowercased and stripped of trailing slashes) and entries are preserved indefinitely without time-based pruning (`keep_days` cleanup bypass).
-
-Mix and standalone modes persist each non-empty generated GitHub section to
-`news-data/github-latest.md`. An empty incremental result never overwrites this
-file. On first startup after upgrading, the cache bootstraps by scanning recent
-push files for the latest non-empty GitHub sentinel section. The shared GitHub
-endpoint reads this persistent cache before using legacy push-file fallback.
-Subsequent daily pushes filter cached repositories against `sent_links` so already delivered projects are never resent.
-
----
-
-## 5. Scheduling and Job Execution
-
-### 5.1 In-Process Scheduling
-
-Powered by `APScheduler`:
-- **Interval Jobs:** Executes fetching cycles based on `fetch_interval_minutes`.
-- **Cron Jobs:** Triggers delivery pipelines based on `delivery.schedules`.
-- **Missed Run Policy:** Default policy skips missed scheduled executions during downtime, with an optional catch-up window.
-
-### 5.2 Unified Job Executor
-
-```text
-Scheduler / Web / Local API / MCP
-              -> submit(fetch | push | preview | run)
-              -> Lock acquisition, Run record generation, Logging, Execution
-```
-
-`run` always executes one complete cycle:
-
-```text
-all enabled news sources -> one scored news pool
-GitHub Trending          -> latest successful GitHub cache
-news pool + GitHub       -> unified selection, metadata, and delivery
-```
-
-There is no morning/evening content branch. `fetch` and `push` remain available
-as lower-level operational jobs, while the Web console's Run action uses the
-complete `run` cycle.
-
-- **Concurrency Control:** Mutex locks prevent concurrent runs of the same job type (returning active Job ID on collision).
-- **Job Tracking:** Each job records `id`, `kind`, `source`, start/finish timestamps, execution status, and output summary.
-- **Preview Dry-Run:** `preview` generates digest contents without updating item delivery histories or triggering notifications.
-
----
-
-## 6. Local Web Console & REST API Specification
-
-### Web UI Pages
-
-1. **Headlines (default):** Latest generated delivery, opened as the first tab and loaded on page initialization.
-2. **Settings:** Preferences, secret state indicators, schedule management, LLM
-   protocol detection and override, an LLM connection test using the current
-   form values, and contextual setup tooltips beside fields such as
-   `FEISHU_WEBHOOK_URL`. The protocol selector and model API key share one
-   responsive settings row for faster connection setup. Visible model and
-   delivery connection fields are automatically persisted after a short input
-   debounce; saves are serialized so an older request cannot overwrite newer
-   form values. Starting a model test flushes any pending connection save first,
-   and periodic status refreshes do not replace connection fields while they are
-   focused, saving, or being tested. Optional integration
-   and control-plane variables (`GITHUB_TOKEN`, `JINA_API_KEY`,
-   `NEWS_AGENT_LOCAL_TOKEN`, and `PH_TOKEN`) remain supported through `.env`
-   but are not rendered in this connection panel. Feishu and Discord webhook
-   fields are rendered next to each other, with Discord immediately following
-   Feishu.
-   Initial page requests may receive concurrent `401` responses. Once one
-   request stores a valid local token in session storage, the remaining requests
-   detect that update and retry silently instead of opening repeated prompts.
-3. **Sources:** The active fetch list, with bilingual content-category filtering, bulk RSS/Atom validation, and confirmed URL removal.
-4. **Logs:** Real-time application log viewer (sanitized of secret keys).
-
-### REST API Surface
-
-| Method | Endpoint | Description |
+| External path | Path after prefix stripping | Purpose |
 |---|---|---|
-| `GET` | `/api/status` | System status and service health |
-| `GET` | `/api/config` | Fetch current configuration |
-| `PUT` | `/api/config/preferences` | Update legacy structured preferences |
-| `PUT` | `/api/personal-preferences` | Update natural language preference statement |
-| `PUT` | `/api/llm-settings` | Save model, endpoint, and selected protocol |
-| `POST` | `/api/llm/test` | Test the current model connection without persisting form values |
-| `GET` | `/api/sources` | List configured feed sources |
-| `POST` | `/api/sources` | Add single feed source |
-| `POST` | `/api/sources/verify` | Validate single feed URL |
-| `POST` | `/api/sources/bulk` | Bulk import feed sources |
-| `GET` | `/api/news-sources` | Combined feed list (RSS + built-in) |
-| `PATCH` | `/api/sources/{id}` | Update feed source state |
-| `DELETE` | `/api/sources/{id}` | Remove feed source |
-| `PUT` | `/api/delivery/schedules` | Update delivery schedules |
-| `POST` | `/api/jobs/fetch` | Trigger background fetch job |
-| `POST` | `/api/jobs/push` | Trigger background push job |
-| `POST` | `/api/jobs/preview` | Generate dry-run preview |
-| `POST` | `/api/jobs/run?confirm=true` | Trigger immediate pipeline run |
-| `GET` | `/api/jobs/{id}` | Query job status and record |
-| `GET` | `/api/logs` | Fetch system logs |
-| `GET` | `/api/server/news` | Pull pre-scored news with `score >= 60` within a specified time window (up to 24h) |
-| `GET` | `/api/server/sources` | Pull the shared server source catalog used for client-side filtering |
-| `GET` | `/api/server/latest-digest` | Pull the latest pre-compiled ready-to-send digest message |
-| `GET` | `/api/server/github-trending` | Pull the latest successful cached GitHub Trending section Markdown |
+| `/news` | - | 308 redirect to `/news/`. |
+| `/news/` | `/` | Portal HTML. |
+| `/news/api/server/signals` | `/api/server/signals` | Anonymous signal browsing. |
+| `/news/api/server/yields` | `/api/server/yields` | Anonymous yield snapshot. |
+| `/news/api/sync/signals` | `/api/sync/signals` | Time-window sync with JWT and a 24-hour cap. |
+| `/news/api/mcp` | `/api/mcp` | MCP Streamable HTTP reporting. |
+| `/news/api/backoffice/*` | `/api/backoffice/*` | Admin JWT APIs. |
+| `/news/api/console/*` | `/api/console/*` | Master admin or slaver loopback console. |
 
-Authentication is intentionally split:
+Rules:
 
-- Shared read endpoints (`/api/server/*`) accept the
-  non-private `processednews` value in `X-News-Agent-Token`.
-- Local configuration, environment, source listing/mutation, job, and log
-  endpoints, including `/api/news-sources`, use `NEWS_AGENT_LOCAL_TOKEN` when
-  configured. They never accept `processednews` as a fallback.
-
-Regular clients bind to `127.0.0.1:12301`. A mix server can bind to a reachable
-interface for multiple clients, but should set `NEWS_AGENT_LOCAL_TOKEN` before
-doing so and apply network restrictions where practical.
+1. All frontend requests and static asset references use relative paths such as `api/...`. Absolute paths bypass the `/news` mount and can fall through to the parent site's HTML fallback, returning HTML instead of JSON.
+2. The application does not embed `/news` in FastAPI routes. It reads `X-Forwarded-Prefix` only to construct the login return path.
+3. There is one prefix. Do not add a second prefix such as `/investor-api`. A slaver needs only `server_url = https://vaneworker.com/news`; sync and MCP paths are joined beneath it.
+4. Master login uses same-origin `/login`; slaver login uses a local one-time-state callback.
 
 ---
 
-## 7. Model Context Protocol (MCP) Integration
+## 4. Identity, Authentication, and Security
 
-Stdio-based MCP server providing tools for local AI agents:
-- Status & Config: `get_status`, `get_config_summary`
-- Feed Management: `list_sources`, `add_rss_source`, `verify_source`, `remove_source`
-- Preferences & Schedule: `set_preferences`, `set_output_language`, `set_delivery_schedule`
-- Job & Log Operations: `preview_digest`, `run_fetch`, `run_push`, `get_job`, `get_recent_logs`
+### 4.1 Master
 
-High-impact operations (`remove_source`, `run_push`) require explicit `confirm=True` parameter.
+- Portal pages and `/api/server/*` are anonymous and render only public data.
+- `/api/sync/*`, `/api/mcp`, `/api/me*`, `/api/console/*`, `/api/sources*`, and `/api/backoffice/*` verify `Authorization: Bearer <manai-pic JWT>` through `GET {auth.main_url}/api/v1/user/me`.
+- `/backoffice` is a public HTML shell. Its JavaScript calls `/api/me` and reveals the console only when the verified admin allowlist matches.
+- Admin APIs do not trust a locally stored role. A verified phone or email must match `NEWS_AGENT_ADMINS` or the legacy `NEWS_AGENT_ADMIN_EMAIL`.
+- MCP validates the token during the handshake before dispatching a tool. Missing or invalid credentials fail with HTTP 401 and a JSON body, not a default identity.
+- The yield snapshot path is separate. It uses a shared `REPORTER_KEY` and does not create or grant a user identity.
 
-The repository also distributes a root-level `SKILL.md` for agents
-performing initial installation and configuration without a browser. It routes
-secrets to `.env`, supported configuration mutations through the validated local
-REST API, and requires health and model checks before preview or explicitly
-confirmed delivery. MCP handoff occurs after initial LLM and delivery credential
-setup because those secret-bearing operations are not MCP tools.
+### 4.2 Slaver
 
----
+A slaver with `server_url` configured needs a verified manai-pic identity before scheduled pull, collection, or report work. A standalone slaver has no login requirement; see [Standalone slaver](#21-standalone-slaver).
 
-## 8. Cross-Platform Lifecycle Management
+The local login flow is:
 
-| OS | Login Autostart Mechanism | Business Scheduling & Logs |
-|---|---|---|
-| macOS | User `LaunchAgent` (`~/Library/LaunchAgents/com.news-agent.service.plist`) | Internal `APScheduler` + File Logs |
-| Windows | Task Scheduler Login Task (`NewsAgentService`) | Internal `APScheduler` + File Logs |
-| Linux | User `systemd` service (`~/.config/systemd/user/news-agent.service`) | Internal `APScheduler` + File Logs |
+1. The UI opens the manai-pic login page.
+2. manai-pic redirects back with a token.
+3. The slaver verifies and stores the token locally.
+4. Pull and report requests send `Authorization: Bearer <token>`.
 
-The background service command `news-agent serve` handles Web/API, scheduling, and job execution across all operating systems.
+The local token endpoint also accepts a manually supplied token for recovery.
 
----
+### 4.3 Security baseline
 
-## 9. Logging & Audit Architecture
+- Identity used for pull and report accounting comes only from a validated JWT, never from the request body.
+- Missing or rejected JWTs fail closed. There is no default identity.
+- Anonymous reporter responses never include email, phone, or other account identifiers.
+- Yield uploads require constant-time comparison of `REPORTER_KEY`.
+- Sync and MCP report endpoints currently have no application-level rate limiting.
 
-Uses Python's standard `logging` library with one directory per calendar day.
-The service keeps the most recent 30 daily directories by default and removes
-older dated directories when logging starts. The retention window is configurable
-through `log.retention_days`.
+### 4.4 Energy ledger
 
-- `app.log`: Service lifecycle, scheduler events, configuration reloads.
-- `fetch.log` / `push.log`: Task execution details.
-- `web.log` / `mcp.log`: Access logs and interface errors.
-- `audit.log`: Record of configuration and feed mutations.
+Energy is recorded but not enforced.
 
----
+| Event | Delta |
+|---|---|
+| Pull a new signal from master | `-0.1` |
+| Pull a signal already held locally | `0` |
+| Successfully report a new signal | `+1` |
 
-## 10. Security Boundaries
+`energy_ledger` stores `user_id`, `event_type`, `signal_id`, `delta`, `balance_after`, and `created_at`. Negative balances are allowed and are unrelated to the manai-pic account balance.
 
-- **Loopback Isolation:** Service binds exclusively to `127.0.0.1`.
-- **SSRF Defense:** Blocks private IP ranges (RFC 1918), loopback, and local network redirects during feed fetching.
-- **Secret Protection:** API keys, webhook URLs, and tokens are scrubbed from log files, MCP responses, and audit records.
+The portal account-energy display comes from the verified manai-pic response (`energy_cached`), not from this ledger. Invite links use the verified `self_code` and the appropriate master or local login route.
 
 ---
 
-## 11. Implementation Phasing
-
-- **Phase 1: Foundation:** Unified directory resolution, file logging, `RunRecord`, `ConfigService`.
-- **Phase 2: Local Control Plane:** FastAPI server (`news-agent serve`), REST API, Web UI.
-- **Phase 3: Scheduling & Service Installation:** APScheduler integration, cross-platform autostart installers.
-- **Phase 4: Agent Integration & Intelligence:** Stdio MCP server, RSS health monitoring, re-ranking optimization.
-
----
-
-## 12. Technical Acceptance Criteria
-
-- Multi-platform service deployment via CLI lifecycle commands; installers restart any existing service after updating its definition and dependencies.
-- Zero external database dependencies; fully functional from local `127.0.0.1:12301` console.
-- Safe concurrent job execution without duplicated fetches or notifications.
-- Complete audit logging and schema validation across Web, API, and MCP channels.

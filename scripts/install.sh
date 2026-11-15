@@ -11,7 +11,7 @@ else
     echo "Cloning news-agent into ${PROJECT_DIR}..."
     if [[ -d "$PROJECT_DIR" ]]; then
         cd "$PROJECT_DIR"
-        git pull --rebase || true
+        git pull --rebase
     else
         git clone https://github.com/huawolf/news-agent.git "$PROJECT_DIR"
     fi
@@ -47,6 +47,11 @@ if [[ ! -f .env ]]; then
     echo "Created .env from .env.example. Add your LLM and push credentials before the first fetch."
 fi
 
+if [[ ! -f config.json ]]; then
+    cp config.json.example config.json
+    echo "Created config.json from config.json.example. Review mode, database, and API settings."
+fi
+
 echo "Syncing locked runtime dependencies..."
 uv sync --locked --no-dev
 
@@ -56,4 +61,14 @@ uv run --no-sync python -m src.main service install
 echo "Restarting the local service..."
 uv run --no-sync python -m src.main service restart
 
-echo "News Agent is ready at http://127.0.0.1:12301"
+echo "Checking local service health..."
+for attempt in {1..30}; do
+    if curl --silent --fail http://127.0.0.1:12301/api/status >/dev/null 2>&1; then
+        echo "News Agent is ready at http://127.0.0.1:12301"
+        exit 0
+    fi
+    sleep 1
+done
+echo "News Agent failed health check. Service status:"
+uv run --no-sync python -m src.main service status || true
+exit 1

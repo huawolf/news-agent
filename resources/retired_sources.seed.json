@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "note": "退役信源。原因是长期不可用，或产出多事件聚合内容（日报/周报/热榜合集），与「一条只讲一件事」的信号契约冲突。启动 seed 时按 xml_url 匹配并禁用已存在的行；源从 rss.opml 移除后不会再被新增。",
+  "rss": [
+    {
+      "title": "SuperTechFans",
+      "xml_url": "https://www.supertechfans.com/cn/index.xml",
+      "reason": "每条都是 Hacker News 热榜十条合集，一条信号讲十件事"
+    },
+    {
+      "title": "Gino Notes",
+      "xml_url": "https://www.ginonotes.com/feed.xml",
+      "reason": "上游站点返回 402 DEPLOYMENT_DISABLED，已停止服务"
+    }
+  ]
+}

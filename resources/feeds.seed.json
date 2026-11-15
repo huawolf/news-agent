@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "feeds": [
+    {"key": "theblockbeats-newsflash", "title": "The BlockBeats Newsflash", "url": "https://en.theblockbeats.news/newsflash"},
+    {"key": "followin-recommended-news", "title": "Followin Recommended News", "url": "https://followin.io/en?tab=recommended-news"},
+    {"key": "foresightnews-news", "title": "Foresight News", "url": "https://foresightnews.pro/news"},
+    {"key": "binance-square-news", "title": "Binance Square News", "url": "https://www.binance.com/en/square/news/all"},
+    {"key": "cryptopanic-home", "title": "CryptoPanic", "url": "https://cryptopanic.com/"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "news-agent-portal-localization",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "vendor": "node scripts/vendor-i18n.cjs"
+  },
+  "dependencies": {
+    "i18next": "26.4.2",
+    "i18next-browser-languagedetector": "8.2.1",
+    "i18next-http-backend": "4.0.2"
+  }
+}

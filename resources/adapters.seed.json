@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "kind": "github_trending",
+      "key": "github_trending",
+      "title": "GitHub Trending",
+      "enabled": true,
+      "params": {
+        "max_items": 3,
+        "max_deep_dive": 10,
+        "readme_max_chars": 10000,
+        "request_timeout": 10,
+        "token_name": "GITHUB_TOKEN"
+      },
+      "note": "master 采集并缓存；slaver 由 MASTER_ONLY_KINDS 拦截，enabled 无论如何不会在 slaver 上执行"
+    },
+    {
+      "kind": "hackernews",
+      "key": "hackernews",
+      "title": "Hacker News",
+      "enabled": true,
+      "params": {
+        "select_k": 3,
+        "top_comments": 50,
+        "top_l2_per_l1": 3,
+        "comment_max_chars": 2000,
+        "comments_total_chars": 80000,
+        "link_content_max_chars": 50000,
+        "request_timeout": 10,
+        "algolia_base": "https://hn.algolia.com/api/v1",
+        "token_name": "JINA_API_KEY"
+      }
+    },
+    {
+      "kind": "google_news",
+      "key": "google_news",
+      "title": "Google News",
+      "enabled": true,
+      "params": {
+        "regions": [
+          "cn",
+          "us"
+        ],
+        "topics": [
+          "business",
+          "technology",
+          "science",
+          "cryptocurrency"
+        ],
+        "max_items_per_feed": 20,
+        "max_lookback_hours": 24,
+        "request_timeout": 10
+      }
+    },
+    {
+      "kind": "signals",
+      "key": "signals",
+      "title": "社区与榜单信号",
+      "enabled": true,
+      "params": {
+        "request_timeout": 10,
+        "max_items_per_source": 5,
+        "rsshub_base": "https://rsshub.umzzz.com",
+        "producthunt_token_env": "PH_TOKEN",
+        "sources": {
+          "github-trending": false,
+          "github-trending-js": false,
+          "github-trending-zh": false,
+          "36kr": true,
+          "sspai": true,
+          "oschina": true,
+          "v2ex": true,
+          "jike-ai-explore": true,
+          "jike-ai-discuss": true,
+          "jike-engineer": true,
+          "appstore-cn": true,
+          "appstore-tw": true,
+          "appstore-us": true,
+          "appstore-jp": true,
+          "appstore-kr": true,
+          "producthunt": true,
+          "reddit": true
+        }
+      },
+      "note": "子源清单留在 params 内，不拆成 fetch_source 行"
+    }
+  ]
+}

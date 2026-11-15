@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from .base import PushPlatform
 from .discord import DiscordPlatform
 from .feishu import FeishuPlatform
+from .telegram import TelegramPlatform
 from .custom import CustomPlatform
 
 
@@ -13,6 +14,7 @@ def create_platform(name: str, config: Dict) -> Optional[PushPlatform]:
     platforms = {
         "discord": DiscordPlatform,
         "feishu": FeishuPlatform,
+        "telegram": TelegramPlatform,
         "custom": CustomPlatform,
     }
 
