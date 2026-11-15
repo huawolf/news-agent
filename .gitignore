@@ -1,51 +1,64 @@
-# 敏感文件
+# Secrets - never commit
 .env
+.env.*
 !.env.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
 
-# 本地配置（使用时从 config.json.example 拷贝并修改）
+# Local configuration
 config.json
 !config.json.example
 
-# Python
+# Runtime data
+data/
+logs/
+temp/
+knowledge/
+runs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+
+# Python build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 *.egg-info/
-dist/
 build/
-.venv
-.DS_Store
+dist/
+.venv/
 
-
-# 测试
+# Test and tool caches
+tests/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
-tests/
-runs/
-logs/
+coverage.xml
 
-# IDE
+# OS and IDE
+.DS_Store
 .idea/
 .vscode/
 *.swp
 *.swo
+*.dbg
 
-# 数据文件
-news-data/
-*.log
-
-
-# Claude/其他代理数据
+# Agent runtime and worktrees
+.codex/
 .omc/
 .claude/
 .loopx/
-.codex/goals/
-
-# Git worktrees
 .worktrees/
 AGENTS.md
-knowledge/
