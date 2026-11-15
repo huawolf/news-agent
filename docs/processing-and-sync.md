@@ -65,7 +65,7 @@ Batch budgeting uses the actual rendered prompt. `llm.max_prompt_chars` applies 
 
 ### 7.3 Final-score ranking
 
-`final_score` starts from the LLM `score` and applies configured ranking adjustments, clamped to 0-100:
+`final_score` starts from the LLM `score` and applies built-in ranking adjustments, clamped to 0-100:
 
 ```text
 score
@@ -90,7 +90,7 @@ Deduplication is a reusable component shared by local collection and master repo
 - Top score at or above the high threshold: duplicate, archive only.
 - Gray-band score: unique, continue.
 
-Default thresholds are `bm25_high_threshold = 100` and `bm25_low_threshold = 40`. They are calibrated for the dedup query construction below; changing the query token cap requires recalibrating both thresholds.
+The internal thresholds are `bm25_high_threshold = 60` and `bm25_low_threshold = 40`. They are calibrated for the dedup query construction below; changing the query token cap requires recalibrating both thresholds.
 
 URL duplicates and BM25 high-threshold duplicates are written to `dedup_duplicate` and application logs. Gray-band candidates are not recorded. There is no manual review queue and no pending adjudication state.
 
@@ -106,7 +106,7 @@ Additional rules:
 
 - Asset tickers are appended to `title_search` in uppercase so asset search is not lost to lowercasing.
 - A configurable user dictionary can add asset aliases, product names, and sector terms.
-- Dedup queries strip HTML and URLs, tokenize with the same jieba path, remove stopwords, punctuation, digits, and single letters, keep English tokens of at least two letters and Chinese tokens containing CJK characters, deduplicate, and take the first `dedup.max_query_tokens` tokens (default 10).
+- Dedup queries strip HTML and URLs, tokenize with the same jieba path, remove stopwords, punctuation, digits, and single letters, keep English tokens of at least two letters and Chinese tokens containing CJK characters, deduplicate, and take the first 10 tokens.
 - User search uses the same tokenizer, takes the first five tokens, and applies token AND.
 
 Scoring formula:
@@ -116,7 +116,7 @@ score = BM25(title_search, k1_title, b_title) * TITLE_WEIGHT
       + BM25(content_search, k1_content, b_content)
 ```
 
-Defaults are `TITLE_WEIGHT = 3.0`, `k1 = 1.5`, and `b = 0.75`. PostgreSQL uses `pg_trgm` GIN plus `ILIKE` for recall; SQLite uses FTS5. Both send candidates to the same application-level scorer in `src/dedup/bm25.py`. BM25 searches only the most recent `dedup.window_hours` (default 72 hours) and applies a same-source bonus (`dedup.same_source_bonus`, default 2.0).
+Defaults are `TITLE_WEIGHT = 3.0`, `k1 = 1.5`, and `b = 0.75`. PostgreSQL uses `pg_trgm` GIN plus `ILIKE` for recall; SQLite uses FTS5. Both send candidates to the same application-level scorer in `src/dedup/bm25.py`. BM25 searches only the most recent 72 hours and applies a same-source bonus of 2.0. These tuning values and the final-score weights are internal code defaults, not supported `config.json` settings.
 
 ### 7.6 Push structure
 

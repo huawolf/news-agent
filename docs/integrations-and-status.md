@@ -78,6 +78,7 @@ Implemented:
 - Bilingual display layers and a master translation worker. Assets and sectors remain language-independent.
 - Reporter aliases, public profiles, overall and last-10 high-score rates, complete public history, the `score >= 60` visibility floor, hidden rows, and a per-reporter daily scoring quota.
 - Separate yield intake and a read-only portal channel. Yield rows never mix with signals.
+- Responsive portal and console layouts: single-column signal cards on phones, card-style yield rows, wrapping source links, stacked console forms, and viewport-safe reporter/settings overlays.
 - Portal language bridging with same-origin manai-pic, `?lng=zh|en`, report profiles, watchlist counts, and the favicon served from `static/favicon.svg`.
 
 Known limitations:

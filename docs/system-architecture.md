@@ -60,9 +60,9 @@ Section numbers are preserved from the original architecture contract so existin
 - Every signal card shows the reporter. Manually reported signals show a clickable `@display_name`; locally collected signals show a non-clickable System label. The reporter route uses `#reporter=<user_id>`, survives refresh, and supports browser back and forward navigation.
 - Reporter profiles expose `display_name`, scored and displayable counts, high-score counts, overall and last-10 high-score rates, and complete public history. The history does not use the portal's seven-day window but still returns only signals with `score >= 60`.
 - A visible signal requires `score >= 60`. Rows below 60, plus aggregate, low-content, and low-value items, remain in `signal` as hidden rows for audit and reporter-rate denominators, but never appear in reader-facing queries. URL deduplication still considers hidden rows.
-- Each reporter may send at most `report.daily_limit_per_user` candidates into LLM scoring per local calendar day in `report.quota_timezone`; the default is 100 in `Asia/Shanghai`. URL duplicates are removed before reservation. Over-limit items are rejected with `quota_exceeded: daily scoring limit` and never reach the scorer.
+- Each reporter may send at most `report.daily_limit_per_user` candidates into LLM scoring per UTC calendar day; the default is 100. URL duplicates are removed before reservation. Over-limit items are rejected with `quota_exceeded: daily scoring limit` and never reach the scorer.
 - Master admin authorization comes only from a verified manai-pic phone number or email matching `NEWS_AGENT_ADMINS`. The legacy `NEWS_AGENT_ADMIN_EMAIL` is also accepted. Email matching is case-insensitive, phone matching is exact, and an empty allowlist grants no admin access. The upstream `is_admin` value is ignored for authorization.
-- Natural-language scoring preferences are editable and injected into the scoring prompt. Ranking weights are runtime configuration and are not editable in the backoffice.
+- Natural-language scoring preferences are editable and injected into the scoring prompt. Ranking weights are internal code defaults and are not editable in either `config.json` or the backoffice.
 - Membership data is read opportunistically from `auth.membership_database_url`. It does not grant access or enforce quotas.
 - Sync and report endpoints have no rate limiter in this implementation. FastAPI documentation routes are enabled by default. A public master must restrict both at the reverse proxy until application-level controls exist.
 
@@ -114,6 +114,8 @@ The repository includes only a Caddy deployment example. Production routing is n
 | `slaver`, `server_url` set | Pull the master pool, collect local sources, avoid duplicate source work, and report local-only signals. | SQLite by default. |
 
 `server_url` is a configuration value, not a mode. There is no third mode for a connected slaver.
+
+The shipped `config.json.example` defaults to a connected slaver with `server_url = https://vaneworker.com/news` and `auth.main_url = https://vaneworker.com`. Clear `server_url` to use the standalone deployment described below.
 
 ### 2.1 Standalone slaver
 

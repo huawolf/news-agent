@@ -1,6 +1,6 @@
 {
     "mode": "slaver",
-    "server_url": "",
+    "server_url": "https://vaneworker.com/news",
     "output_language": "en",
     "content_languages": ["en"],
     "personal_preferences": "Track cross-sector investment signals: AI infrastructure, frontier tech, crypto on-chain flows, commodities supply gaps and macro policy shifts. Prefer primary sources, quantitative evidence and material changes over commentary.",
@@ -10,7 +10,7 @@
         "sqlite_path": "data/news_agent.db"
     },
     "auth": {
-        "main_url": "http://127.0.0.1:5678",
+        "main_url": "https://vaneworker.com",
         "request_timeout": 10,
         "membership_database_url": ""
     },
@@ -29,27 +29,6 @@
         "user_dict": "",
         "extra_stopwords": []
     },
-    "ranking": {
-        "title_weight": 3.0,
-        "k1": 1.5,
-        "b": 0.75,
-        "interest_match_bonus": 10.0,
-        "source_weight": 5.0,
-        "watchlist_bonus": 15.0,
-        "recency_bonus": 10.0,
-        "avoid_penalty": 20.0,
-        "interest_keywords": [],
-        "avoid_keywords": [],
-        "source_weights": {}
-    },
-    "dedup": {
-        "bm25_low_threshold": 40.0,
-        "bm25_high_threshold": 100.0,
-        "top_k": 10,
-        "window_hours": 72,
-        "same_source_bonus": 2.0,
-        "max_query_tokens": 10
-    },
     "sync": {
         "page_size": 200,
         "max_lookback_hours": 24
@@ -58,10 +37,7 @@
         "batch_size": 200,
         "content_max_bytes": 8192,
         "path": "/api/mcp",
-        "daily_limit_per_user": 100,
-        "quota_timezone": "Asia/Shanghai",
-        "retry_attempts": 3,
-        "retry_backoff_seconds": 1.0
+        "daily_limit_per_user": 100
     },
     "mcp": {
         "server_name": "news-agent-master",

@@ -31,9 +31,9 @@ DEFAULT_MIN_STORE_SCORE = 60
 DEFAULT_PUSH_MIN_SCORE = 80
 
 #: Each reporter may send at most this many candidates into LLM scoring per
-#: local calendar day.  The cap counts requests, not stored rows.
+#: local calendar day. The cap counts requests, not stored rows.
 DEFAULT_DAILY_SCORING_LIMIT = 100
-DEFAULT_QUOTA_TIMEZONE = "Asia/Shanghai"
+DEFAULT_QUOTA_TIMEZONE = "UTC"
 
 DEFAULT_DATABASE_URL = ""
 DEFAULT_SCHEMA = "news_agent"
@@ -148,7 +148,9 @@ def get_dedup_config(config: Dict) -> Dict:
     dedup = dict(config.get("dedup") or {})
     return {
         "bm25_low_threshold": float(dedup.get("bm25_low_threshold", 40.0)),
-        "bm25_high_threshold": float(dedup.get("bm25_high_threshold", 100.0)),
+        # Calibrated with the dedup query builder below: unrelated pairs stay
+        # below ~25 and true reprints score at least 60.
+        "bm25_high_threshold": float(dedup.get("bm25_high_threshold", 60.0)),
         "top_k": int(dedup.get("top_k", 10)),
         "window_hours": int(dedup.get("window_hours", 72)),
         "same_source_bonus": float(dedup.get("same_source_bonus", 2.0)),
@@ -157,10 +159,11 @@ def get_dedup_config(config: Dict) -> Dict:
 
 
 def get_ranking_config(config: Dict) -> Dict:
-    """BM25 tuning plus the signal score bonuses (§5.5, §5.6).
+    """Internal BM25 tuning plus signal score bonuses (§5.5, §5.6).
 
-    Title and body get their own ``k1`` / ``b`` pair; the flat ``k1`` / ``b`` keys
-    stay supported as the shared default so an existing config keeps working.
+    These are implementation defaults, not user-facing configuration. Title and
+    body get their own ``k1`` / ``b`` pair; the flat ``k1`` / ``b`` keys remain
+    accepted for backward compatibility with older local configs.
     """
     ranking = dict(config.get("ranking") or {})
     k1 = float(ranking.get("k1", 1.5))

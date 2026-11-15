@@ -50,7 +50,7 @@ iwr -useb https://raw.githubusercontent.com/huawolf/news-agent/main/scripts/inst
 
 From a clone, run `./scripts/install.sh` or `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1`. The installer creates missing `config.json` and `.env` files from the examples, installs locked dependencies, registers a per-user service, and waits for the default local slaver health check at <http://127.0.0.1:12301/api/status>.
 
-Review both files before the first fetch. The default configuration is an independent slaver with SQLite and does not require manai-pic, a master, or PostgreSQL. It still needs network access to its enabled sources and an LLM endpoint for scoring; delivery credentials are needed only for enabled push targets, and BrowserWorker is needed only for Feed-page collection.
+Review both files before the first fetch. The default configuration is a connected slaver with SQLite: it pulls the shared pool from `https://vaneworker.com/news`, reports local-only signals back to it, and requires a manai-pic login before scheduled collection starts. It does not require PostgreSQL. It still needs network access to its enabled sources and an LLM endpoint for scoring; delivery credentials are needed only for enabled push targets, and BrowserWorker is needed only for Feed-page collection.
 
 ## Configure
 
@@ -58,10 +58,10 @@ Use `config.json` for runtime behavior. Keep secrets in `.env`; the variable nam
 
 | Section | Purpose |
 |---|---|
-| `mode`, `server_url` | Select `master` or `slaver`; an empty `server_url` keeps a slaver local-only. |
-| `database`, `auth` | Database DSN/schema and optional manai-pic identity lookup. `auth` is unused by a standalone slaver. |
+| `mode`, `server_url` | Select `master` or `slaver`. The example connects to `https://vaneworker.com/news`; set `server_url` to an empty string for a fully local slaver. |
+| `database`, `auth` | Database DSN/schema and manai-pic identity settings. A connected slaver uses `auth.main_url` for login; a standalone slaver does not. |
 | `schedule`, `fetch`, `filter` | Fetch cadence, concurrency/timeouts, and storage-age/score floors. |
-| `dedup`, `ranking`, `tokenizer` | URL/BM25 deduplication, final-score weighting, and text tokenization. |
+| `tokenizer` | Optional jieba user dictionary and extra stopwords. URL/BM25 deduplication and ranking weights are internal defaults. |
 | `output_language`, `content_languages`, `translation` | Primary output language, additional portal languages, and the master-only translation worker. |
 | `llm` | Scoring endpoint, model, protocol, prompts, retries, and batch limits. |
 | `delivery`, `push` | Cron push schedules, section limits, and Feishu/Discord/Telegram/custom targets. |

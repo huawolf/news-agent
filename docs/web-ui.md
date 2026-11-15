@@ -13,6 +13,7 @@ The anonymous read-only portal is served at `/news/`.
 - The signal list initially shows `final_score > 80` with bullish or bearish direction. The display-settings dialog can change direction, region, and minimum score. Region defaults to all. Display settings are stored in `localStorage`; signed-in users also sync to `user_preference`.
 - Only a region subset sends the `regions` parameter. All selected means no region condition. Region-agnostic signals are retained in every region view.
 - Secondary filter tabs are underline tabs below the top-level channel. Hot shows All plus enabled sectors. Following shows All plus watched assets with seven-day counts. GitHub hides both groups. Mobile tab rows scroll horizontally without wrapping.
+- Narrow screens keep the portal readable without horizontal clipping: signal cards collapse to one column below 480px, long titles and source links wrap, and assets/sector pills wrap instead of forcing the score column wider. Yield rows render as labeled cards below 760px instead of a 920px-wide table.
 - Changing a secondary filter or an in-group condition keeps the previous cards visible with a translucent refreshing state until the new result arrives, preventing layout collapse. The root reserves scrollbar space to avoid horizontal shift.
 - Full-text search follows the current UI locale. The portal language switch supports `zh` and `en`; requests send the selected `locale`, and untranslated rows fall back to the main language. Language is mirrored to `localStorage['news-agent-language']` and same-origin manai-pic `localStorage.language` (`en` to `en-US`, `zh` to `zh-CN`). `?lng=zh|en` is kept in the URL for sharing and deep links.
 - All, Hot, and Following group and format dates by `first_seen_at` in the browser time zone. Group headings show month/day, relative day, and weekday. Signal time uses `Date.toLocaleString()`.
@@ -28,6 +29,8 @@ The anonymous read-only portal is served at `/news/`.
 The console has Settings and Sources tabs. Settings contains LLM, ranking preferences, watchlist, fetch/push, Feishu, and Telegram. Sources contains separate RSS and Feed lists. RSS supports create, read, update, delete, search, and manual fetch. Feed rows show fixed page URLs and explain that only slavers collect them after RSS through the local BrowserWorker daemon. Feed rows cannot be created, edited, or deleted in the backoffice.
 
 The console router is shared with slaver through `src/api/console.py::build_console_router(guard)`. Master injects admin identity; slaver injects the loopback guard. Master rows use `owner = public`; slaver rows use `user:<id>` or the temporary placeholder.
+
+On narrow screens the console stacks form fields and source/watchlist rows, gives push schedules a two-row layout, enlarges touch targets, and keeps help tooltips inside the viewport. The reporter overlay uses a full-screen panel with three statistics columns at tablet widths and two on phones.
 
 Secrets follow one `.env` rule: a non-empty submitted value replaces the line, an empty value preserves the existing secret, and only an explicit clear action removes it. Treating an empty field as delete would erase `.env` secrets whenever the page is saved without retyping them.
 

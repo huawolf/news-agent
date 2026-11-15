@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Iterable
 
+from src.config import get_ranking_config
+
 
 def calculate_final_score(
     score: float,
@@ -14,7 +16,7 @@ def calculate_final_score(
     text: str = "",
     config: dict | None = None,
 ) -> float:
-    ranking = dict((config or {}).get("ranking") or {})
+    ranking = get_ranking_config(config or {})
     base = max(0.0, min(100.0, float(score or 0.0)))
     watch = {str(item).strip().upper() for item in watchlist if item}
     current = {str(item).strip().upper() for item in assets if item}

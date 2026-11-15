@@ -131,7 +131,7 @@ energy_credited == inserted
 
 `inserted` counts publicly visible new signals. `hidden` counts scored rows hidden by the visibility floor or a quality flag. `scored` is their sum. `energy_credited` equals `inserted`; a fully duplicate batch credits zero.
 
-The daily quota is reserved after URL deduplication and before translation, BM25, and scoring. It is keyed by `(user_id, usage_date)` in `report.quota_timezone`, updated atomically, and persisted across requests and sessions. URL duplicates do not consume quota.
+The daily quota is reserved after URL deduplication and before translation, BM25, and scoring. It is keyed by `(user_id, usage_date)` in UTC, updated atomically, and persisted across requests and sessions. URL duplicates do not consume quota.
 
 ### 9.4 Tool: `get_server_info`
 
